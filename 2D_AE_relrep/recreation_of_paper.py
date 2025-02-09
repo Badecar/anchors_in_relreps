@@ -1,4 +1,3 @@
-# %%
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -7,15 +6,11 @@ from torchvision import datasets, transforms
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import random
-
-
 import numpy as np
 from sklearn.decomposition import PCA
+from mpl_toolkits.mplot3d import Axes3D
 
-# %% [markdown]
 # For reproducibility and consistency across runs, we will set a seed
-
-# %%
 def set_random_seeds(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -29,10 +24,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
 print(torch.cuda.get_device_name(0))  # Prints the GPU name
 
-# %% [markdown]
 # Loading the MNIST dataset. Changing the __getitem_ function to give a touple label with the number and a unique idx
-
-# %%
 # Custom MNIST dataset that returns image and a tuple (index, label)
 class IndexedMNIST(datasets.MNIST):
     def __getitem__(self, index):
@@ -69,10 +61,7 @@ def load_mnist_data(batch_size=256, download=True):
     
     return train_loader, test_loader
 
-# %% [markdown]
 # AutoEncoder Class
-
-# %%
 class Autoencoder(nn.Module):
     """
     Autoencoder with a bottleneck of size 2 that maps MNIST images to a 2D latent space.
@@ -270,10 +259,8 @@ class Autoencoder(nn.Module):
         return embeddings_concat, indices_concat, labels_concat
 
 
-# %% [markdown]
 # Visualization functions
 
-# %%
 def visualize_reconstruction_by_id(unique_id, autoencoder, dataset, device='cuda'):
     """
     Visualizes the original image and its reconstruction from the autoencoder
@@ -376,10 +363,7 @@ def visualize_reconstruction_from_embedding(anchor_embedding, autoencoder, devic
 # visualize_image_by_idx(1122, dataset)
 
 
-# %% [markdown]
 # Computing anchors and relative coordinates
-
-# %%
 def select_anchors_by_id(AE_list, embeddings_list, indices_list, desired_ids, dataset=None, show=False):
     """
     Selects anchor embeddings based on the unique IDs from the dataset. Optionally shows
@@ -448,11 +432,9 @@ def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
         relative_reps_outer.append(np.array(relative_reps_inner))
     return relative_reps_outer
 
-# %% [markdown]
-# Train AE
 
-# %%
-def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors_num=2, latent_dim = 2, hidden_layer = 128, trials=1):
+# Train AE
+def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -491,37 +473,26 @@ def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors
         embeddings_list.append(embeddings.cpu().numpy()), indices_list.append(indices.cpu()), labels_list.append(labels.cpu().numpy()), AE_list.append(AE)
     return AE_list, embeddings_list, indices_list, labels_list
 
-# %% [markdown]
 # Run experiment
-
-# %%
 # Train AE
 AE_list, embeddings_list, indices_list, labels_list = run_experiment(
     num_epochs=5,
     batch_size=256,
     lr=1e-3,
     device=device,      
-    latent_dim=10,
-    anchors_num=2,       
+    latent_dim=3,
     hidden_layer=128,
-    trials=4
+    trials=1
 )
 
-# %% [markdown]
 # Find anchors and relative coordinates
-
-# %%
 train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
-random_anchor_ids = random.sample(range(len(train_loader.dataset)), 2)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, train_loader.dataset, show=False)
+random_anchor_ids = random.sample(range(len(test_loader.dataset)), 3)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False)
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
-# %% [markdown]
 # Plotting
-
-# %%
-
 def fit_and_align_pca(data, ref_pca=None):
     """
     Fits PCA on 'data', then aligns its components with the reference PCA 
@@ -605,6 +576,38 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
     plt.tight_layout()
     plt.show()
 
+
+def plot_3D_relreps(embeddings, labels):
+    """
+    Plots the AE latent embeddings color-coded by label.
+    If embeddings are 2D, it makes a 2D plot.
+    If embeddings are 3D, it creates an interactive 3D plot.
+
+    Args:
+        embeddings (np.array): Array of shape [N, 2] or [N, 3] containing latent embeddings.
+        labels (np.array): Array of shape [N] containing the corresponding labels.
+        title (str): Title for the plot.
+    """
+    if slice:
+        condition = np.logical_not((embeddings[:, 0] > 0) & (embeddings[:, 1] > 0))
+        embeddings = embeddings[condition]
+        labels = labels[condition]
+        fig = plt.figure(figsize=(8,6))
+        ax = fig.add_subplot(111, projection='3d')
+        scatter = ax.scatter(embeddings[:, 0], embeddings[:, 1], embeddings[:, 2],
+                             c=labels, cmap='tab10', s=10, alpha=0.7)
+        # Create a colorbar. Note: use fig.colorbar and pass the mappable (scatter)
+        cbar = fig.colorbar(scatter, ax=ax, ticks=range(10), shrink=0.5, aspect=10)
+        cbar.set_label('Labels')
+        ax.set_xlabel('Dimension 1')
+        ax.set_ylabel('Dimension 2')
+        ax.set_zlabel('Dimension 3')
+        ax.set_title("3D Relrep Plot")
+        plt.show()
+    
+if len(relative_coords_list[0][0]) == 3:
+    for relrep in range(len(relative_coords_list)):
+        plot_3D_relreps(relative_coords_list[relrep], labels_list[relrep])
 
 # Plot encodings side by side
 plot_data_list(embeddings_list, 
