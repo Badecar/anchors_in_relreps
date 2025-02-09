@@ -11,6 +11,8 @@ import random
 
 import numpy as np
 from sklearn.decomposition import PCA
+from scipy.spatial.distance import pdist
+
 
 # %% [markdown]
 # For reproducibility and consistency across runs, we will set a seed
@@ -339,6 +341,7 @@ def visualize_image_by_idx(idx, dataset, use_flattened=True):
     plt.axis("off")
     plt.show()
 
+
 def visualize_reconstruction_from_embedding(anchor_embedding, autoencoder, device='cuda'):
     """
     Visualizes the image obtained by decoding a given anchor embedding.
@@ -448,11 +451,22 @@ def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
         relative_reps_outer.append(np.array(relative_reps_inner))
     return relative_reps_outer
 
+def objective_function(embeddings, anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
+    def diversity(embeddings, anchors):
+        return (1/len(embeddings)) * sum([min([
+                                        abs(pdist([embedding, anchor], metric="cosine")) for anchor in anchors])
+                                        for embedding in embeddings])
+    
+    def coverage(anchors, exponent):
+        dists = pdist(anchors, metric="cosine")
+        return sum(abs(dist)**exponent for dist in dists)
+    
+    return (diversity_weight * diversity(embeddings, anchors) - Coverage_weight * coverage(anchors, exponent))[0]
 # %% [markdown]
 # Train AE
 
 # %%
-def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors_num=2, latent_dim = 2, hidden_layer = 128, trials=1):
+def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -502,7 +516,6 @@ AE_list, embeddings_list, indices_list, labels_list = run_experiment(
     lr=1e-3,
     device=device,      
     latent_dim=10,
-    anchors_num=2,       
     hidden_layer=128,
     trials=4
 )
@@ -605,15 +618,8 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
     plt.tight_layout()
     plt.show()
 
-
 # Plot encodings side by side
-plot_data_list(embeddings_list, 
-                labels_list,
-                do_pca=True, is_relrep=False)
+plot_data_list(embeddings_list, labels_list, do_pca=True, is_relrep=False)
 
 # Plot rel_reps side by side with sign alignment
-plot_data_list(relative_coords_list, labels_list,
-                do_pca=True, is_relrep=True)
-
-
-
+plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
