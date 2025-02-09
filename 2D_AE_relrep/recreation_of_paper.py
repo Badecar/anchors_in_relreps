@@ -10,12 +10,13 @@ import random
 
 
 import numpy as np
+from sklearn.decomposition import PCA
 
 # %% [markdown]
 # For reproducibility and consistency across runs, we will set a seed
 
 # %%
-def set_random_seeds(seed=1):
+def set_random_seeds(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
@@ -379,7 +380,7 @@ def visualize_reconstruction_from_embedding(anchor_embedding, autoencoder, devic
 # Computing anchors and relative coordinates
 
 # %%
-def select_anchors_by_id(AE, embeddings, all_ids, desired_ids, dataset=None, show=False):
+def select_anchors_by_id(AE_list, embeddings_list, indices_list, desired_ids, dataset=None, show=False):
     """
     Selects anchor embeddings based on the unique IDs from the dataset. Optionally shows
     the original images that correspond to the selected anchors.
@@ -395,23 +396,25 @@ def select_anchors_by_id(AE, embeddings, all_ids, desired_ids, dataset=None, sho
     Returns:
         anchors (np.array): Array of selected anchor embeddings of shape [len(desired_ids), latent_dim].
     """
-    anchor_list = []
-    for uid in desired_ids:
-        # Find the position where the dataset id matches the desired id.
-        idx = np.where(all_ids == uid)[0]
-        if idx.size == 0:
-            raise ValueError(f"ID {uid} not found in the obtained indices.")
-        anchor_list.append(embeddings[idx[0]])
+    anchor_set_list = []
+    for AE, embeddings, all_ids in zip(AE_list, embeddings_list, indices_list):
+        anchor_list = []
+        for uid in desired_ids:
+            # Find the position where the dataset id matches the desired id.
+            idx = np.where(all_ids == uid)[0]
+            if idx.size == 0:
+                raise ValueError(f"ID {uid} not found in the obtained indices.")
+            anchor_list.append(embeddings[idx[0]])
+            
+            # If show flag is set, display the corresponding image from the dataset and the reconstruction
+            if show:
+                visualize_image_by_idx(uid,dataset,use_flattened=True)
+                visualize_reconstruction_from_embedding(embeddings[idx[0]],AE,device)
         
-        # If show flag is set, display the corresponding image from the dataset and the reconstruction
-        if show:
-            visualize_image_by_idx(uid,dataset,use_flattened=True)
-            visualize_reconstruction_from_embedding(embeddings[idx[0]],AE,device)
-    
-    return np.stack(anchor_list)
+        anchor_set_list.append(np.stack(anchor_list))
+    return anchor_set_list
 
-
-def compute_relative_coordinates(embeddings, anchors, flatten=False):
+def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
     """
     Transforms embeddings into a relative coordinate system based on provided anchors.
     This implementation normalizes both embeddings and anchors, and then computes
@@ -426,26 +429,30 @@ def compute_relative_coordinates(embeddings, anchors, flatten=False):
         relative_embeds (np.array): Array of shape [N, A] where each element is the cosine similarity
                                      between an embedding and an anchor.
     """
-    # Normalize embeddings and anchors along the latent_dim axis
-    embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
-    anchors_norm = anchors / np.linalg.norm(anchors, axis=1, keepdims=True)
-    
-    relative_reps = []
-    
-    for embedding in embeddings_norm:
-        if flatten:
-            embedding = embedding.flatten()
-        # Compute cosine similarity by dot product with each normalized anchor
-        sim = np.dot(anchors_norm, embedding)
-        relative_reps.append(sim)
-    
-    return np.array(relative_reps)
+    relative_reps_outer = []
+    for embeddings, anchors in zip(embeddings_list, anchors_list):
+        # Normalize embeddings and anchors along the latent_dim axis
+        embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        anchors_norm = anchors / np.linalg.norm(anchors, axis=1, keepdims=True)
+        
+        relative_reps_inner = []
+        
+        for embedding in embeddings_norm:
+            if flatten:
+                embedding = embedding.flatten()
+
+            # Compute cosine similarity by dot product with each normalized anchor
+            reletive_rep = np.array([np.dot(embedding, anchor) for anchor in anchors_norm])
+            relative_reps_inner.append(reletive_rep)
+        
+        relative_reps_outer.append(np.array(relative_reps_inner))
+    return relative_reps_outer
 
 # %% [markdown]
 # Train AE
 
 # %%
-def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors_num=2, latent_dim = 2, hidden_layer = 128):
+def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors_num=2, latent_dim = 2, hidden_layer = 128, trials=1):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -465,37 +472,40 @@ def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', anchors
         embeddings (Tensor): Latent embeddings from the test (or train) set.
         anchors (Tensor): (Optional) set of anchor embeddings if you implement that step here.
     """
-    
-    # Create the data loaders
-    train_loader, test_loader = load_mnist_data(batch_size=batch_size)
+    embeddings_list = []
+    indices_list = []
+    labels_list = []
+    AE_list = []
+    for i in range(trials):
+        set_random_seeds(i+1)
+        print(f"Trial {i+1} of {trials}")
+        # Create the data loaders
+        train_loader, test_loader = load_mnist_data(batch_size=batch_size)
+        # Initialize and train the autoencoder
+        AE = Autoencoder(latent_dim=latent_dim, hidden_size=hidden_layer)
+        AE.to(device)
+        train_losses, test_losses = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=False)
 
-    # Initialize and train the autoencoder
-    AE = Autoencoder(latent_dim=latent_dim, hidden_size=hidden_layer)
-    AE.to(device)
-    train_losses, test_losses = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=True)
-
-    # Extract latent embeddings from the test loader
-    embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
-
-    return AE, embeddings.cpu(), indices.cpu(), labels.cpu()
+        # Extract latent embeddings from the test loader
+        embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
+        embeddings_list.append(embeddings.cpu().numpy()), indices_list.append(indices.cpu()), labels_list.append(labels.cpu().numpy()), AE_list.append(AE)
+    return AE_list, embeddings_list, indices_list, labels_list
 
 # %% [markdown]
 # Run experiment
 
 # %%
 # Train AE
-AE, embeddings, indices, labels = run_experiment(
+AE_list, embeddings_list, indices_list, labels_list = run_experiment(
     num_epochs=5,
     batch_size=256,
     lr=1e-3,
     device=device,      
-    latent_dim=2,       
-    hidden_layer=128
+    latent_dim=10,
+    anchors_num=2,       
+    hidden_layer=128,
+    trials=4
 )
-
-# embeddings is a Tensor, indices is a numpy array, labels is a Tensor.
-embeddings_np = embeddings.cpu().numpy()
-labels_np = labels.cpu().numpy()
 
 # %% [markdown]
 # Find anchors and relative coordinates
@@ -504,50 +514,106 @@ labels_np = labels.cpu().numpy()
 train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
 random_anchor_ids = random.sample(range(len(train_loader.dataset)), 2)
-anchors = select_anchors_by_id(AE, embeddings_np, indices, random_anchor_ids, train_loader.dataset, show=True)
-relative_coords = compute_relative_coordinates(embeddings_np, anchors, flatten=False)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, train_loader.dataset, show=False)
+relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
 # %% [markdown]
 # Plotting
 
 # %%
-def plot_embeddings(embeddings, labels, title=""):
-    """
-    Plots the AE latent embeddings (2D) color-coded by label.
 
-    Args:
-        embeddings (np.array): Array of shape [N, 2] containing latent embeddings.
-        labels (np.array): Array of shape [N] containing the corresponding labels.
+def fit_and_align_pca(data, ref_pca=None):
     """
-    plt.figure(figsize=(8,6))
-    scatter = plt.scatter(embeddings[:, 0], embeddings[:, 1],
-                          c=labels, cmap='tab10', s=10, alpha=0.7)
-    plt.colorbar(scatter, ticks=range(10))
-    plt.xlabel('Dimension 1')
-    plt.ylabel('Dimension 2')
-    plt.title(title)
+    Fits PCA on 'data', then aligns its components with the reference PCA 
+    so that signs are consistent. Returns (pca, data_pca), where pca
+    is the fitted PCA object and data_pca is the 2D projection.
+
+    If ref_pca is None, this PCA becomes the new reference.
+    If ref_pca is not None, the new PCA is aligned (sign-flipped if needed)
+    to match the reference's orientation.
+    """
+    pca = PCA(n_components=2, random_state=42)
+    data_pca = pca.fit_transform(data)
+    
+    if ref_pca is None:
+        # First time: no reference to align with, just return
+        return pca, data_pca
+    
+    # Align the sign of the new components with the reference
+    for i in range(2):
+        dot_product = np.dot(pca.components_[i], ref_pca.components_[i])
+        if dot_product < 0:
+            pca.components_[i] = -pca.components_[i]
+            data_pca[:, i]     = -data_pca[:, i]
+    
+    return data_pca
+
+
+def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
+                   is_relrep=True):
+    """
+    Plots multiple datasets side-by-side in subplots (1 row, len(data_list) columns).
+    
+    data_list : list of np.ndarray
+        Each element is a dataset (shape [n_samples, n_features]).
+    label_list : list of np.ndarray
+        Each element is the label array for the corresponding dataset.
+    do_pca : bool
+        Whether to run PCA on the data. If True, we use fit_and_align_pca.
+    ref_pca : PCA or None
+        If None, the first dataset's PCA becomes the reference.
+        If not None, subsequent datasets align to this PCA orientation.
+    get_ref_pca : bool
+        If True, return the final PCA used for alignment (could be the first one).
+    is_relrep : bool
+        If True, changes the plot title to "Related Representations", else "AE Encodings".
+    """
+    
+    n_plots = len(data_list)
+    fig, axs = plt.subplots(1, n_plots, figsize=(6*n_plots, 5), squeeze=False)
+    axs = axs.ravel()  # Flatten in case there's only 1 subplot
+    
+    for i, (data, labels) in enumerate(zip(data_list, labels_list)):
+        if do_pca:
+            if ref_pca is None:
+                pca, data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+            else:
+                if is_relrep:
+                    data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+                else:
+                    _, data_2d = fit_and_align_pca(data, ref_pca=None)
+
+            # If we didn't already have a reference, the first fitted pca becomes ref
+            if i == 0 and ref_pca is None:
+                ref_pca = pca
+        else:
+            data_2d = data
+        
+        scatter = axs[i].scatter(data_2d[:, 0], data_2d[:, 1],
+                                 c=labels, cmap='tab10', s=10, alpha=0.7)
+        # Optionally add a colorbar to each subplot
+        cb = fig.colorbar(scatter, ax=axs[i], ticks=range(10))
+        cb.set_label('Label')
+        
+        axs[i].set_xlabel('PC 1')
+        axs[i].set_ylabel('PC 2')
+        if is_relrep:
+            axs[i].set_title(f'2D PCA of Related Reps {i+1}')
+        else:
+            axs[i].set_title(f'2D PCA of AE Encodings {i+1}')
+    
+    plt.tight_layout()
     plt.show()
 
 
-def plot_rel_reps(relative_coords, labels, title=""):
-    """
-    Plots the relative representations (computed via cosine-similarities to anchors)
-    in a 2D space, color-coded by label.
+# Plot encodings side by side
+plot_data_list(embeddings_list, 
+                labels_list,
+                do_pca=True, is_relrep=False)
 
-    Args:
-        relative_coords (np.array): Array of shape [N, 2] containing relative representations.
-        labels (np.array): Array of shape [N] containing the corresponding labels.
-    """
-    plt.figure(figsize=(8,6))
-    scatter = plt.scatter(relative_coords[:, 0], relative_coords[:, 1],
-                          c=labels, cmap='tab10', s=10, alpha=0.7)
-    plt.colorbar(scatter, ticks=range(10))
-    plt.xlabel('Dimension 1')
-    plt.ylabel('Dimension 2')
-    plt.title(title)
-    plt.show()
+# Plot rel_reps side by side with sign alignment
+plot_data_list(relative_coords_list, labels_list,
+                do_pca=True, is_relrep=True)
 
-plot_embeddings(embeddings_np, labels_np, title="AE Absolute Embeddings")
-plot_rel_reps(relative_coords, labels_np, title="Relative Embeddings")
 
 
