@@ -11,8 +11,9 @@ import random
 import numpy as np
 from models import Autoencoder, train_AE
 from data import load_mnist_data
-from visualization import visualize_reconstruction_from_embedding, visualize_image_by_idx, visualize_reconstruction_by_id, fit_and_align_pca, plot_data_list, plot_3D_relreps
-from anchors import select_anchors_by_id, compute_relative_coordinates, objective_function
+from visualization import plot_data_list, plot_3D_relreps
+from anchors import select_anchors_by_id, objective_function
+from relreps import compute_relative_coordinates
 
 
 # For reproducibility and consistency across runs, we set a seed
