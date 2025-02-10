@@ -107,9 +107,7 @@ class Autoencoder(nn.Module):
         Returns:
             z (Tensor): Encoded latent vectors of shape [batch_size, latent_dim].
         """
-
-        z = self.encoder(x)
-        return z
+        return self.encoder(x)
 
 
     def decode(self, z):
@@ -121,9 +119,7 @@ class Autoencoder(nn.Module):
         Returns:
             x_rec (Tensor): Reconstructed images of shape [batch_size, 784].
         """
-
-        x_rec = self.decoder(z)
-        return x_rec
+        return self.decoder(z)
 
     def forward(self, x):
         """
@@ -134,8 +130,7 @@ class Autoencoder(nn.Module):
         Returns:
             reconstructed (Tensor): Reconstructed images of the same shape as x.
         """
-        reconstructed = self.decode(self.encode(x))
-        return reconstructed
+        return self.decode(self.encode(x))
 
     def train_one_epoch(self, train_loader, optimizer, criterion, device='cuda'):
         """
