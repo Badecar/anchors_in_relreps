@@ -11,6 +11,12 @@ import numpy as np
 from models import Autoencoder, train_AE, load_saved_embeddings
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
+from anchors import select_anchors_by_id, objective_function, greedy_one_at_a_time
+from relreps import compute_relative_coordinates
+
+
+# For reproducibility and consistency across runs, we set a seed
+set_random_seeds(42)
 from anchors import select_anchors_by_id, objective_function
 from relreps import compute_relative_coordinates, compare_latent_spaces
 set_random_seeds(40)
@@ -52,14 +58,10 @@ print(f"Dimensions of indices_list: {len(indices_list)} x {len(indices_list[0])}
 print(f"Dimensions of labels_list: {len(labels_list)} x {len(labels_list[0])}")
 
 # Find anchors and compute relative coordinates
-if anchors_setting == 'ids':
-    anchor_ids = [101, 205],
-elif anchors_setting == 'greedy':
-    # implement greedy function here
-    anchor_ids = random.sample(range(len(test_loader.dataset)), anchor_num)
-else:
-    anchor_ids = random.sample(range(len(test_loader.dataset)), anchor_num)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, anchor_ids, test_loader.dataset, show=show_anchor_images, device=device)
+manual_anchor_ids = [101, 205]
+greedy_anchor_ids = greedy_one_at_a_time(embeddings_list[0], indices_list[0], 10)
+random_anchor_ids = random.sample(range(len(test_loader.dataset)), anchor_num)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, greedy_anchor_ids, test_loader.dataset, show=show_anchor_images, device=device)
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
 
@@ -72,8 +74,11 @@ if plot_results:
     # Plot encodings side by side
     plot_data_list(embeddings_list, labels_list, do_pca=True, is_relrep=False)
 
-    # Plot rel_reps side by side with sign alignment
-    plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+# Plot rel_reps side by side with sign alignment
+plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
+relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
+plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
 
 
 ### Similarity calculations ###
