@@ -33,8 +33,8 @@ latent_dim = 15
 anchors_setting = 'random' # random, greedy, ids
 anchor_num = 15
 show_anchor_images = False
-plot_results = True
-nr_runs = 3
+plot_results = False
+nr_runs = 5
 
 # Running experiment
 if load_saved:
@@ -61,7 +61,7 @@ print(f"Dimensions of labels_list: {len(labels_list)} x {len(labels_list[0])}")
 manual_anchor_ids = [101, 205]
 greedy_anchor_ids = greedy_one_at_a_time(embeddings_list[0], indices_list[0], 10)
 random_anchor_ids = random.sample(range(len(test_loader.dataset)), anchor_num)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, greedy_anchor_ids, test_loader.dataset, show=show_anchor_images, device=device)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=show_anchor_images, device=device)
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
 
@@ -74,15 +74,15 @@ if plot_results:
     # Plot encodings side by side
     plot_data_list(embeddings_list, labels_list, do_pca=True, is_relrep=False)
 
-# Plot rel_reps side by side with sign alignment
-plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
-relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
-plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+    # # Plot rel_reps side by side with sign alignment
+    # plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+    # anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
+    # relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
+    # plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
 
 
 ### Similarity calculations ###
-mrr_matrix, mean_mrr, cos_sim_matrix, mean_cos_sim = compare_latent_spaces(embeddings_list, indices_list, compute_mrr=False, AE_list=AE_list)
+mrr_matrix, mean_mrr, cos_sim_matrix, mean_cos_sim = compare_latent_spaces(relative_coords_list, indices_list, compute_mrr=False, AE_list=AE_list)
 print("\nSimilarity Results:")
 if mrr_matrix[0][0] is not None:
     print(f"Mean Reciprocal Rank (MRR): {mean_mrr:.4f}")
