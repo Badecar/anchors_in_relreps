@@ -1,6 +1,5 @@
 import numpy as np
 
-
 def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
     """
     Transforms embeddings into a relative coordinate system based on provided anchors.
