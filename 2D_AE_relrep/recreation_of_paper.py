@@ -106,9 +106,7 @@ class Autoencoder(nn.Module):
         Returns:
             z (Tensor): Encoded latent vectors of shape [batch_size, latent_dim].
         """
-
-        z = self.encoder(x)
-        return z
+        return self.encoder(x)
 
 
     def decode(self, z):
@@ -120,9 +118,7 @@ class Autoencoder(nn.Module):
         Returns:
             x_rec (Tensor): Reconstructed images of shape [batch_size, 784].
         """
-
-        x_rec = self.decoder(z)
-        return x_rec
+        return self.decoder(z)
 
     def forward(self, x):
         """
@@ -133,8 +129,7 @@ class Autoencoder(nn.Module):
         Returns:
             reconstructed (Tensor): Reconstructed images of the same shape as x.
         """
-        reconstructed = self.decode(self.encode(x))
-        return reconstructed
+        return self.decode(self.encode(x))
 
     def train_one_epoch(self, train_loader, optimizer, criterion, device='cuda'):
         """
@@ -446,10 +441,8 @@ def objective_function(embeddings, anchors, Coverage_weight=1, diversity_weight=
         return sum(abs(dist)**exponent for dist in dists)
     
     return (diversity_weight * diversity(embeddings, anchors) - Coverage_weight * coverage(anchors, exponent))[0]
-# %% [markdown]
-# Train AE
 
-# %%
+# Train AE
 def run_experiment(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1):
     """
     Orchestrates the autoencoder pipeline:
