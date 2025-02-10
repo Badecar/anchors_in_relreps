@@ -458,8 +458,8 @@ def greedy_one_at_a_time(embeddings, indices, num_anchors, Coverage_weight=1, di
     Returns:
       anchors_idx: list of selected indices.
     """
-    embeddings = np.array(embeddings)  # (n, d)
-    indices = np.array(indices)
+    embeddings = embeddings  # (n, d)
+    indices = indices.numpy()
 
     # Normalize embeddings once for cosine computations.
     norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
@@ -575,7 +575,7 @@ AE_list, embeddings_list, indices_list, labels_list = run_experiment(
     batch_size=256,
     lr=1e-3,
     device=device,      
-    latent_dim=3,
+    latent_dim=10,
     hidden_layer=128,
     trials=1
 )
@@ -585,12 +585,14 @@ train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
 
 random_anchor_ids = random.sample(range(len(test_loader.dataset)), 10)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False)
-print(f"objective_function value for random anchors: {objective_function(embeddings_list[0], anchors_list[0])}")
+anchors_list_random = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False)
+print(f"objective_function value for random anchors: {objective_function(embeddings_list[0], anchors_list_random[0])}")
 
 greedy_ids = greedy_one_at_a_time(embeddings_list[0], indices_list[0], 10)
 anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, greedy_ids, test_loader.dataset, show=False)
 print(f"objective_function value for greedy algo: {objective_function(embeddings_list[0], anchors_list[0])}")
+print(random_anchor_ids)
+print(greedy_ids)
 
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 

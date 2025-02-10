@@ -12,7 +12,7 @@ import numpy as np
 from models import Autoencoder, train_AE
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
-from anchors import select_anchors_by_id, objective_function
+from anchors import select_anchors_by_id, objective_function, greedy_one_at_a_time
 from relreps import compute_relative_coordinates
 
 
@@ -29,16 +29,17 @@ AE_list, embeddings_list, indices_list, labels_list = train_AE(
     batch_size=256,
     lr=1e-3,
     device=device,      
-    latent_dim=3,
+    latent_dim=10,
     hidden_layer=128,
-    trials=1
+    trials=4
 )
 
 # Find anchors and compute relative coordinates
 train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
-random_anchor_ids = random.sample(range(len(test_loader.dataset)), 3)
-anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
+random_anchor_ids = random.sample(range(len(test_loader.dataset)), 10)
+greedy_anchor_ids = greedy_one_at_a_time(embeddings_list[0], indices_list[0], 10)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, greedy_anchor_ids, test_loader.dataset, show=False, device=device)
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
 
@@ -53,4 +54,7 @@ if len(relative_coords_list[0][0]) == 3:
 plot_data_list(embeddings_list, labels_list, do_pca=True, is_relrep=False)
 
 # Plot rel_reps side by side with sign alignment
+plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
+relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
