@@ -70,7 +70,7 @@ def visualize_image_by_idx(idx, dataset, use_flattened=True):
     plt.show()
 
 
-def visualize_reconstruction_from_embedding(anchor_embedding, autoencoder, device='cuda'):
+def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda'):
     """
     Visualizes the image obtained by decoding a given anchor embedding.
     
@@ -82,16 +82,16 @@ def visualize_reconstruction_from_embedding(anchor_embedding, autoencoder, devic
     autoencoder.eval()
     
     # Convert anchor_embedding to a Tensor if it's not already, and ensure it has a batch-dimension.
-    if not torch.is_tensor(anchor_embedding):
-        anchor_embedding = torch.tensor(anchor_embedding, dtype=torch.float)
-    if anchor_embedding.dim() == 1:
-        anchor_embedding = anchor_embedding.unsqueeze(0)
+    if not torch.is_tensor(embedding):
+        embedding = torch.tensor(embedding, dtype=torch.float)
+    if embedding.dim() == 1:
+        embedding = embedding.unsqueeze(0)
     
-    anchor_embedding = anchor_embedding.to(device)
+    embedding = embedding.to(device)
     
     with torch.no_grad():
         # Use the decode function to get the reconstructed image.
-        decoded = autoencoder.decode(anchor_embedding)
+        decoded = autoencoder.decode(embedding)
     
     # Reshape the flattened image tensor (assuming MNIST images => 28x28)
     image = decoded.view(28, 28).cpu().numpy()

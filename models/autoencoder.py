@@ -145,7 +145,7 @@ class Autoencoder(nn.Module):
         """
         self.to(device)
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        loss_function = nn.MSELoss()
+        loss_function = nn.MSELoss() # BCE loss may be better but gets error
 
         train_loss_list = []
         test_loss_list = []
@@ -194,3 +194,4 @@ class Autoencoder(nn.Module):
         labels_concat  = torch.cat(labels, dim=0)
 
         return embeddings_concat, indices_concat, labels_concat
+

@@ -1,6 +1,8 @@
 import numpy as np
 import random
 from scipy.spatial.distance import pdist
+from tqdm import tqdm
+import torch
 
 def objective_function(embeddings, anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
     def coverage(embeddings, anchors):
@@ -129,7 +131,7 @@ def greedy_one_at_a_time_single(embeddings, indices, num_anchors, Coverage_weigh
         return np.sum(abs(pdist(anchor_array, metric="cosine")) ** exponent)
 
     # Greedily add anchors.
-    for _ in range(num_anchors - 1):
+    for _ in tqdm(range(num_anchors - 1), desc="Selecting anchors"):
         best_index = None
         best_score = -np.inf
         best_new_min_dists = None
@@ -281,4 +283,140 @@ def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Cove
             min_dists = np.min(dists, axis=0)
         min_dists = best_new_min_dists
 
+    return anchors_idx
+
+
+### HYPERTUNING ###
+# # Define a grid of hyperparameters for anchor selection
+# coverage_weights = [0.5, 1, 2, 4]
+# diversity_weights = [0.5, 1, 2, 5]
+# exponents = [0.25, 0.5, 0.75, 1, 1.5]
+
+# results = []
+
+# total_configurations = len(coverage_weights) * len(diversity_weights) * len(exponents)
+# for cov_w, div_w, exp_val in tqdm.tqdm(product(coverage_weights, diversity_weights, exponents), total=total_configurations, desc="Hyperparameter Search"):
+#     print(f"\nTrying configuration: Coverage_weight={cov_w}, diversity_weight={div_w}, exponent={exp_val}")
+#     # Select anchors using the current hyperparameters
+#     greedy_anchor_ids = greedy_one_at_a_time(
+#         embeddings_list[0],
+#         indices_list[0],
+#         anchor_num,
+#         Coverage_weight=cov_w,
+#         diversity_weight=div_w,
+#         exponent=exp_val
+#     )
+#     # Get anchor embeddings
+#     anchors_list_current = select_anchors_by_id(
+#         AE_list,
+#         embeddings_list,
+#         indices_list,
+#         greedy_anchor_ids,
+#         test_loader.dataset,
+#         show=False,
+#         device=device
+#     )
+#     # Compute the relative coordinates based on these anchors
+#     relative_coords_list_current = compute_relative_coordinates(
+#         embeddings_list,
+#         anchors_list_current,
+#         flatten=False
+#     )
+#     # Evaluate the resulting latent space similarity measures
+#     mrr_matrix, mean_mrr, cos_sim_matrix, mean_cos_sim = compare_latent_spaces(
+#         relative_coords_list_current,
+#         indices_list,
+#         compute_mrr=compute_mrr,
+#         AE_list=AE_list
+#     )
+#     print(f"Mean MRR: {mean_mrr:.4f}  |  Mean Cosine Similarity: {mean_cos_sim:.4f}")
+#     results.append({
+#         "Coverage_weight": cov_w,
+#         "diversity_weight": div_w,
+#         "exponent": exp_val,
+#         "mean_mrr": mean_mrr,
+#         "mean_cos_sim": mean_cos_sim
+#     })
+# # Print all results
+# print("\nAll configurations and their results:")
+# for result in results:
+#     print(result)
+
+
+# best_config_cos = max(results, key=lambda x: x["mean_cos_sim"])
+# print("\nBest configuration based on Mean cos sim:")
+# print(best_config_cos)
+
+# best_config_mrr = max(results, key=lambda x: x["mean_mrr"])
+# print("\nBest configuration based on Mean MRR:")
+# print(best_config_mrr)
+
+
+# Optimized version but it gives worse results
+def greedy_one_at_a_time_optimized(embeddings, indices, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
+    embeddings = np.asarray(embeddings)
+    indices = np.asarray(indices)
+    
+    # Normalize embeddings for cosine computations
+    norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
+    normalized = embeddings / norms
+    
+    # Use a set for fast membership testing
+    selected_set = set()
+    
+    # Randomly select the first anchor
+    init = int(random.choice(indices))
+    anchors_idx = [init]
+    selected_set.add(init)
+    
+    # Compute initial distances to the first anchor: cosine distance = 1 - dot product.
+    min_dists = 1 - np.dot(normalized, normalized[init])
+    
+    # Precompute initial coverage (empty for 1 anchor)
+    current_coverage = 0.0
+
+    for _ in tqdm(range(num_anchors - 1), desc="Selecting anchors"):
+        # Vectorize over candidate indices not yet selected
+        candidate_mask = np.array([idx not in selected_set for idx in indices])
+        candidate_indices = indices[candidate_mask]
+        
+        # For each candidate, compute candidate distances in one vectorized operation.
+        candidate_vecs = normalized[candidate_indices]  # shape (k, d)
+        # Dot products: shape (n, k)
+        candidate_dot = np.dot(normalized, candidate_vecs.T)
+        # Cosine distances
+        candidate_dists = 1 - candidate_dot  # shape (n, k)
+        # New min distances if candidate were added: compare to existing min_dists
+        new_min_dists = np.minimum(min_dists[:, None], candidate_dists)
+        # Diversity measure: average over embeddings for each candidate
+        diversity_vals = np.mean(new_min_dists, axis=0)
+        
+        # Compute incremental coverage for each candidate:
+        # For each candidate, compute distances to already selected anchors.
+        selected_vectors = normalized[anchors_idx]  # shape (m, d)
+        # For each candidate (each row in candidate_vecs), compute distances to each selected anchor.
+        inc_cov = 1 - np.dot(candidate_vecs, selected_vectors.T)  # shape (k, m)
+        # Sum up the incremental coverage contributions (raised to exponent)
+        inc_cov = np.sum(np.abs(inc_cov) ** exponent, axis=1)
+        # New total coverage would be current_coverage + inc_cov, but note that for comparing candidates
+        # you can simply compare the incremental addition.
+        
+        # Overall objective for each candidate:
+        # We want to maximize: -diversity_weight * diversity_val + Coverage_weight * (current_coverage + inc_cov)
+        scores = -diversity_weight * diversity_vals + Coverage_weight * (current_coverage + inc_cov)
+        
+        # Choose the candidate with the highest score
+        best_idx = candidate_indices[np.argmax(scores)]
+        best_candidate_vec = normalized[best_idx]
+        
+        # Update selected anchors and the set
+        anchors_idx.append(best_idx)
+        selected_set.add(best_idx)
+        
+        # Update current min distances: the best candidate might reduce the distance for some embeddings.
+        min_dists = np.minimum(min_dists, 1 - np.dot(normalized, best_candidate_vec))
+        
+        # Update coverage: add incremental coverage for the best candidate.
+        current_coverage += np.sum(np.abs(1 - np.dot(selected_vectors, best_candidate_vec)) ** exponent)
+        
     return anchors_idx
