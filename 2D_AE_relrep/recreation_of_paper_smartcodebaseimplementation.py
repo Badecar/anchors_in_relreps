@@ -8,14 +8,11 @@ from utils import set_random_seeds
 import torch
 import random
 import numpy as np
-from models import Autoencoder, train_AE, load_saved_embeddings
+from models import train_AE, load_saved_embeddings
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
 from anchors import select_anchors_by_id, greedy_one_at_a_time, greedy_one_at_a_time_optimized
 from relreps import compute_relative_coordinates, compare_latent_spaces
-import tqdm
-from itertools import product
-
 
 # For reproducibility and consistency across runs, we set a seed
 set_random_seeds(42)
@@ -27,11 +24,11 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 train_loader, test_loader = load_mnist_data()
 
 ### PARAMETERS ###
-load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
+load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = False        # Save embeddings from current run
-latent_dim = 30         # If load_saved: Must match an existing dim
-anchor_num = 30 
-nr_runs = 5             # If load_saved: Must be <= number of saved runs for the dim
+latent_dim = 2         # If load_saved: Must match an existing dim
+anchor_num = 2
+nr_runs = 1             # If load_saved: Must be <= number of saved runs for the dim
 plot_results = False
 compute_mrr = True      # Only set true if you have >32GB of RAM
 
@@ -40,11 +37,10 @@ coverage_w = 1
 diversity_w = 0.5
 exponent = 0.25
 
-
 ### Running experiment ###
 if load_saved:
     embeddings_list, indices_list, labels_list = load_saved_embeddings(trials=nr_runs, latent_dim=latent_dim)
-    AE_list = np.zeros(nr_runs)
+    AE_list = np.zeros(nr_runs) # Initializing an empty AE list to use in select_anchors_by_id (needed for plotting only)
 else:
     # Run experiment
     AE_list, embeddings_list, indices_list, labels_list = train_AE(
@@ -56,7 +52,7 @@ else:
         hidden_layer=128,
         trials=nr_runs,
         save=save_run,
-        verbose=True
+        verbose=False
     )
 
 # Find anchors and compute relative coordinates

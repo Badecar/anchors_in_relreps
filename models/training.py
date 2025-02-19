@@ -4,8 +4,11 @@ from models import Autoencoder
 import numpy as np
 import torch
 import random
+import torch.nn as nn
 from data import load_mnist_data
 from utils import set_random_seeds
+from tqdm import tqdm
+from relreps import encode_relative_by_index
 
 # Train AE
 def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, save=False, verbose=False):
@@ -50,9 +53,20 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
 
         # Extract latent embeddings from the test loader
         embeddings, indices, labels = AE.get_latent_embeddings(test_loader, device=device)
-        embeddings_list.append(embeddings.cpu().numpy())
-        indices_list.append(indices.cpu())
-        labels_list.append(labels.cpu().numpy())
+        # Sorting based on idx
+        emb = embeddings.cpu().numpy()
+        idx = indices.cpu()
+        lab = labels.cpu().numpy()
+
+        mask = np.argsort(idx)
+        embeddings_sorted = emb[mask]
+        idx_sorted = idx[mask]
+        labels_sorted = lab[mask]
+
+        # Appending results
+        embeddings_list.append(embeddings_sorted)
+        indices_list.append(idx_sorted)
+        labels_list.append(labels_sorted)
         AE_list.append(AE)
         # Save embeddings, indices, and labels if flag is set.
         
@@ -100,3 +114,28 @@ def load_saved_embeddings(trials=1, latent_dim=int, save_dir=None):
         labels_list.append(labels)
         
     return embeddings_list, indices_list, labels_list
+
+
+def train_on_relrep(model, relreps, train_loader, test_loader, num_epochs=5, lr=1e-3, device='cuda', latent_dim = 2, verbose=False):
+    for param in model.encoder.parameters():
+        param.requires_grad = False
+    
+    optimizer = torch.optim.Adam(model.decoder.parameters(), lr=lr)
+    loss_function = nn.MSELoss()
+    model.train()
+
+    for epoch in tqdm(range(num_epochs), desc="Training Epochs"):
+        epoch_loss = 0.0
+        for x, _ in train_loader:
+            x = x.to(device)
+
+            # Forward pass
+            
+
+
+            # Test loss
+            test_loss = self.evaluate(test_loader, criterion=loss_function, device=device)
+            test_loss_list.append(test_loss)
+            if verbose:
+                print(f'Epoch #{epoch}')
+                print(f'Train Loss = {train_loss:.3e} --- Test Loss = {test_loss:.3e}')

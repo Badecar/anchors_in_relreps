@@ -2,7 +2,6 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
-from visualization import visualize_reconstruction_from_embedding
 
 def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, compute_mrr=False, AE1=None, AE2=None):
     """
