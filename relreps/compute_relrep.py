@@ -1,4 +1,6 @@
 import numpy as np
+from scipy.spatial.distance import pdist
+
 
 def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
     """
@@ -34,3 +36,42 @@ def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
         relative_reps_outer.append(np.array(relative_reps_inner))
     return relative_reps_outer
 
+
+def compute_relative_coordinates_euclidean(embeddings_list, anchors_list, flatten=False):
+    relative_reps_outer = []
+    for embeddings, anchors in zip(embeddings_list, anchors_list):
+        diff = np.array([np.linalg.norm(embeddings - anchor, axis=1) for anchor in anchors]).T
+        relative_reps_outer.append(diff)
+    return relative_reps_outer
+
+
+def encode_relative_by_index(index, embeddings, anchors, flatten=False):
+    """
+    Computes the relative representation for a given data point index.
+    
+    Args:
+        index (int): Index of the data point.
+        embeddings (np.ndarray): Array of shape [N, latent_dim] containing latent embeddings.
+        anchors (np.ndarray): Array of shape [A, latent_dim] containing anchor embeddings.
+        flatten (bool): If True, will flatten the embeddings before processing.
+
+    Returns:
+        np.ndarray: Relative representation vector of shape [A,], where each element is the cosine 
+                    similarity between the data point's latent embedding and an anchor.
+    """
+    # Retrieve the latent embedding for the specified index.
+    embedding = embeddings[index] # Assuming that the embeddings are sorted by index already (which they should be)
+    
+    if flatten:
+        embedding = embedding.flatten()
+    
+    # Normalize the embedding vector.
+    embedding_norm = embedding / np.linalg.norm(embedding)
+    
+    # Normalize the anchors along the latent_dim axis.
+    anchors_norm = anchors / np.linalg.norm(anchors, axis=1, keepdims=True)
+    
+    # Compute cosine similarity between the normalized embedding and each normalized anchor.
+    rel_rep = np.dot(anchors_norm, embedding_norm)
+    
+    return rel_rep
