@@ -1,9 +1,11 @@
-from .autoencoder import Autoencoder
-from .training import train_AE, load_saved_embeddings, train_decoder_on_relreps
+from .autoencoder import Autoencoder, AEClassifier
+from .training import train_AE, load_saved_embeddings
+from .relrep_fitter import RelRepTrainer
 
 __all__ = [
     'Autoencoder',
+    'AEClassifier',
     'train_AE',
     'load_saved_embeddings',
-    'train_decoder_on_relreps'
+    'RelRepTrainer'
     ]

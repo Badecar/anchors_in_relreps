@@ -19,7 +19,7 @@ class Autoencoder(nn.Module):
         # 784 -> 128 -> 2
         encoder_layers = [
             nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
-            nn.ReLU(),
+            nn.Sigmoid(),
             nn.BatchNorm1d(hidden_size),
             nn.Linear(hidden_size, latent_dim), # the size 2 bottleneck layer
             nn.BatchNorm1d(latent_dim)
@@ -36,6 +36,9 @@ class Autoencoder(nn.Module):
             nn.Sigmoid() # normalize outputs to [0, 1] - grayscale
         ]
         self.decoder = nn.Sequential(*decoder_layers)
+
+        # Classifier Layers
+        # 2 -> 128 -> 
 
     def encode(self, x):
         """
@@ -195,3 +198,145 @@ class Autoencoder(nn.Module):
 
         return embeddings_concat, indices_concat, labels_concat
 
+import torch.nn as nn
+
+class AEClassifier(nn.Module):
+    """
+    Classifier that reuses the encoder functionality (as in the Autoencoder)
+    and adds a classification head for predicting labels.
+    Inherits directly from nn.Module.
+    """
+    def __init__(self, latent_dim=2, hidden_size=128, num_classes=10):
+        super().__init__()
+        # Encoder layers (same as in the Autoencoder)
+        encoder_layers = [
+            nn.Linear(28 * 28, hidden_size),  # assuming 28x28 images
+            nn.Sigmoid(),
+            nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, latent_dim),  # bottleneck
+            nn.BatchNorm1d(latent_dim)
+        ]
+        self.encoder = nn.Sequential(*encoder_layers)
+        
+        # Classifier head layers
+        self.classifier = nn.Sequential(
+            nn.Linear(latent_dim, hidden_size),
+            nn.ReLU(),
+            nn.BatchNorm1d(hidden_size),
+            nn.Linear(hidden_size, num_classes)
+        )
+
+    def encode(self, x):
+        # Flatten input if necessary (e.g., from images to vector)
+        if x.dim() > 2:
+            x = x.view(x.size(0), -1)
+        z = self.encoder(x)
+        return z
+
+    def forward(self, x):
+        z = self.encode(x)
+        logits = self.classifier(z)
+        return logits
+
+    def train_one_epoch(self, train_loader: DataLoader, optimizer, criterion, device='cuda'):
+        loss_total = 0.0
+        self.train()
+        for x, y_tuple in train_loader:
+            x = x.to(device)
+            # Unpack y tuple to get the label only.
+            _, y = y_tuple  
+            y = y.to(device)
+            logits = self.forward(x)
+            loss = criterion(logits, y)
+            loss_total += loss.item()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+        return loss_total / len(train_loader)
+
+    def evaluate(self, data_loader: DataLoader, criterion, device='cuda'):
+        self.eval()
+        loss_total = 0.0
+        with torch.no_grad():
+            for x, y_tuple in data_loader:
+                x = x.to(device)
+                _, y = y_tuple
+                y = y.to(device)
+                logits = self.forward(x)
+                loss = criterion(logits, y)
+                loss_total += loss.item()
+        return loss_total / len(data_loader)
+
+    def accuracy(self, data_loader: DataLoader, device='cuda'):
+        """
+        Computes the accuracy (percentage of correct predictions) on a dataset.
+        """
+        self.eval()
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for x, y_tuple in data_loader:
+                x = x.to(device)
+                _, y = y_tuple
+                y = y.to(device)
+                logits = self.forward(x)
+                preds = logits.argmax(dim=1)
+                correct += (preds == y).sum().item()
+                total += y.size(0)
+        return correct / total if total > 0 else 0.0
+
+    def fit(self, train_loader: DataLoader, test_loader: DataLoader, num_epochs, lr=1e-3, device='cuda', verbose=True):
+        """
+        High-level method to train the classifier for a given number of epochs.
+        Uses CrossEntropyLoss for classification.
+        
+        Returns:
+            train_losses (list of float): Loss for each training epoch.
+            test_losses (list of float): Loss for each test epoch.
+        """
+        self.to(device)
+        optimizer = torch.optim.Adam(self.parameters(), lr=lr)
+        loss_function = nn.CrossEntropyLoss()
+        train_loss_list = []
+        test_loss_list = []
+        for epoch in tqdm(range(num_epochs), desc="Training Epochs"):
+            train_loss = self.train_one_epoch(train_loader, optimizer, loss_function, device=device)
+            train_loss_list.append(train_loss)
+            test_loss = self.evaluate(test_loader, loss_function, device=device)
+            test_loss_list.append(test_loss)
+            if verbose:
+                acc = self.accuracy(test_loader, device=device)
+                print(f"Epoch {epoch}: Train Loss = {train_loss:.3e}, Test Loss = {test_loss:.3e}, Test Acc = {acc*100:.2f}%")
+        return train_loss_list, test_loss_list
+    
+    def get_latent_embeddings(self, data_loader, device='cuda'):
+        """
+        Passes the entire dataset through the encoder to extract latent vectors.
+        
+        Args:
+            data_loader (DataLoader): DataLoader for the dataset to encode.
+            device (str): 'cpu' or 'cuda'.
+        
+        Returns:
+            embeddings (Tensor): Concatenated latent vectors of shape [N, latent_dim].
+            (indices, labels) (tuple of Tensors): Unique indices and corresponding labels for each sample.
+        """
+        embeddings = []
+        indices = []
+        labels = []
+
+        self.eval()  # Disable gradient computation
+
+        with torch.no_grad():
+            for x, (idx, lab) in data_loader:
+                x = x.to(device)
+                z = self.encode(x)
+                embeddings.append(z)
+                indices.append(idx)
+                labels.append(lab)
+        
+        embeddings_concat = torch.cat(embeddings, dim=0)
+        indices_concat = torch.cat(indices, dim=0)
+        labels_concat  = torch.cat(labels, dim=0)
+
+        return embeddings_concat, indices_concat, labels_concat

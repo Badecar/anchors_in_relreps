@@ -2,7 +2,6 @@ import numpy as np
 import random
 from scipy.spatial.distance import pdist
 from tqdm import tqdm
-import torch
 
 def objective_function(embeddings, anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
     def coverage(embeddings, anchors):
@@ -89,7 +88,7 @@ def greedy_one_at_a_time(embeddings, indices, num_anchors, Coverage_weight=1, di
 
     return anchors_idx
 
-def greedy_one_at_a_time_single(embeddings, indices, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
+def greedy_one_at_a_time_single_cossim(embeddings, indices, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=0.5):
     """
     Select anchors greedily by maximizing a trade-off between diversity and coverage.
     
@@ -167,11 +166,6 @@ def greedy_one_at_a_time_single(embeddings, indices, num_anchors, Coverage_weigh
         min_dists = best_new_min_dists
 
     return anchors_idx
-
-import numpy as np
-import random
-from scipy.spatial.distance import pdist
-from tqdm import tqdm
 
 def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=1, repetitions=1):
     """
@@ -284,69 +278,3 @@ def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Cove
         min_dists = best_new_min_dists
 
     return anchors_idx
-
-
-### HYPERTUNING ###
-# # Define a grid of hyperparameters for anchor selection
-# coverage_weights = [0.5, 1, 2, 4]
-# diversity_weights = [0.5, 1, 2, 5]
-# exponents = [0.25, 0.5, 0.75, 1, 1.5]
-
-# results = []
-
-# total_configurations = len(coverage_weights) * len(diversity_weights) * len(exponents)
-# for cov_w, div_w, exp_val in tqdm.tqdm(product(coverage_weights, diversity_weights, exponents), total=total_configurations, desc="Hyperparameter Search"):
-#     print(f"\nTrying configuration: Coverage_weight={cov_w}, diversity_weight={div_w}, exponent={exp_val}")
-#     # Select anchors using the current hyperparameters
-#     greedy_anchor_ids = greedy_one_at_a_time(
-#         embeddings_list[0],
-#         indices_list[0],
-#         anchor_num,
-#         Coverage_weight=cov_w,
-#         diversity_weight=div_w,
-#         exponent=exp_val
-#     )
-#     # Get anchor embeddings
-#     anchors_list_current = select_anchors_by_id(
-#         AE_list,
-#         embeddings_list,
-#         indices_list,
-#         greedy_anchor_ids,
-#         test_loader.dataset,
-#         show=False,
-#         device=device
-#     )
-#     # Compute the relative coordinates based on these anchors
-#     relative_coords_list_current = compute_relative_coordinates(
-#         embeddings_list,
-#         anchors_list_current,
-#         flatten=False
-#     )
-#     # Evaluate the resulting latent space similarity measures
-#     mrr_matrix, mean_mrr, cos_sim_matrix, mean_cos_sim = compare_latent_spaces(
-#         relative_coords_list_current,
-#         indices_list,
-#         compute_mrr=compute_mrr,
-#         AE_list=AE_list
-#     )
-#     print(f"Mean MRR: {mean_mrr:.4f}  |  Mean Cosine Similarity: {mean_cos_sim:.4f}")
-#     results.append({
-#         "Coverage_weight": cov_w,
-#         "diversity_weight": div_w,
-#         "exponent": exp_val,
-#         "mean_mrr": mean_mrr,
-#         "mean_cos_sim": mean_cos_sim
-#     })
-# # Print all results
-# print("\nAll configurations and their results:")
-# for result in results:
-#     print(result)
-
-
-# best_config_cos = max(results, key=lambda x: x["mean_cos_sim"])
-# print("\nBest configuration based on Mean cos sim:")
-# print(best_config_cos)
-
-# best_config_mrr = max(results, key=lambda x: x["mean_mrr"])
-# print("\nBest configuration based on Mean MRR:")
-# print(best_config_mrr)

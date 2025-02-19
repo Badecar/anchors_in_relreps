@@ -2,7 +2,7 @@ import numpy as np
 from scipy.spatial.distance import pdist
 
 
-def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
+def compute_relative_coordinates_cossim(embeddings_list, anchors_list, flatten=False):
     """
     Transforms embeddings into a relative coordinate system based on provided anchors.
     This implementation normalizes both embeddings and anchors, and then computes
