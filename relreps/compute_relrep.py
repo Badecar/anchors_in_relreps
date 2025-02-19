@@ -1,4 +1,5 @@
 import numpy as np
+from scipy.spatial.distance import pdist
 
 
 def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
@@ -33,4 +34,12 @@ def compute_relative_coordinates(embeddings_list, anchors_list, flatten=False):
             relative_reps_inner.append(reletive_rep)
         
         relative_reps_outer.append(np.array(relative_reps_inner))
+    return relative_reps_outer
+
+
+def compute_relative_coordinates_euclidean(embeddings_list, anchors_list, flatten=False):
+    relative_reps_outer = []
+    for embeddings, anchors in zip(embeddings_list, anchors_list):
+        diff = np.array([np.linalg.norm(embeddings - anchor, axis=1) for anchor in anchors]).T
+        relative_reps_outer.append(diff)
     return relative_reps_outer

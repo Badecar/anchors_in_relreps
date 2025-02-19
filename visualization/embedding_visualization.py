@@ -31,7 +31,7 @@ def fit_and_align_pca(data, ref_pca=None):
 
 
 def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
-                   is_relrep=True):
+                   is_relrep=True, anchors_list=None):
     """
     Plots multiple datasets side-by-side in subplots (1 row, len(data_list) columns).
     
@@ -51,7 +51,7 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
     """
     
     n_plots = len(data_list)
-    fig, axs = plt.subplots(1, n_plots, figsize=(6*n_plots, 5), squeeze=False)
+    fig, axs = plt.subplots(1, n_plots, figsize=(7*n_plots, 4), squeeze=False)
     axs = axs.ravel()  # Flatten in case there's only 1 subplot
     
     for i, (data, labels) in enumerate(zip(data_list, labels_list)):
@@ -72,6 +72,8 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
         
         scatter = axs[i].scatter(data_2d[:, 0], data_2d[:, 1],
                                  c=labels, cmap='tab10', s=10, alpha=0.7)
+        if anchors_list is not None:
+            axs[i].scatter(anchors_list[i][:, 0], anchors_list[i][:, 1], s=25, marker="*", c='#000000')
         # Optionally add a colorbar to each subplot
         cb = fig.colorbar(scatter, ax=axs[i], ticks=range(10))
         cb.set_label('Label')
