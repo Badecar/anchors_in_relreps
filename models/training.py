@@ -11,7 +11,7 @@ from tqdm import tqdm
 from relreps import encode_relative_by_index
 
 # Train AE
-def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, save=False, verbose=False):
+def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, save=False, verbose=False, train_loader=None, test_loader=None, seed=42):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -42,10 +42,10 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
         os.makedirs(save_dir, exist_ok=True)
 
     for i in range(trials):
-        set_random_seeds(i+1)
+        set_random_seeds(seed)
         print(f"Trial {i+1} of {trials}")
         # Create the data loaders
-        train_loader, test_loader = load_mnist_data(batch_size=batch_size)
+        # train_loader, test_loader = load_mnist_data(batch_size=batch_size)
         # Initialize and train the autoencoder
         AE = Autoencoder(latent_dim=latent_dim, hidden_size=hidden_layer)
         AE.to(device)
@@ -120,7 +120,8 @@ def train_on_relrep(model, relreps, train_loader, test_loader, num_epochs=5, lr=
     for param in model.encoder.parameters():
         param.requires_grad = False
     
-    optimizer = torch.optim.Adam(model.decoder.parameters(), lr=lr)
+    optimizer = torch.optim.Adam(model.decoder.parameters(), lr=lr) # change model to anchors parameters
+
     loss_function = nn.MSELoss()
     model.train()
 

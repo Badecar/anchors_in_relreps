@@ -3,6 +3,23 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 import torch.nn as nn
 
+
+class Anchor(nn.Module):
+    def __init__(self, N=100, N_anchors=2):
+        super().__init__()
+        self.P = nn.Parameter((N, N_anchors))
+
+    def forward(self, X):
+        """
+        X = [N, D]
+        P = [N_anchors, N]
+        out = [N_anchors, D]
+        """
+
+        return self.P @ X
+
+
+
 # AutoEncoder Class
 class Autoencoder(nn.Module):
     """
@@ -19,9 +36,11 @@ class Autoencoder(nn.Module):
         # 784 -> 128 -> 2
         encoder_layers = [
             nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
-            nn.ReLU(),
-            nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, latent_dim), # the size 2 bottleneck layer
+            nn.Sigmoid(),
+            nn.Linear(hidden_size, hidden_size//2), # asuming size 28x28 of the images
+            nn.BatchNorm1d(hidden_size//2),
+            nn.Sigmoid(),
+            nn.Linear(hidden_size//2, latent_dim), # the size 2 bottleneck layer
             nn.BatchNorm1d(latent_dim)
         ]
         self.encoder = nn.Sequential(*encoder_layers) # '*' is unpacking the list into it's elements

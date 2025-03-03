@@ -11,12 +11,12 @@ import numpy as np
 from models import train_AE, load_saved_embeddings
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
-from anchors import select_anchors_by_id, objective_function, greedy_one_at_a_time, greedy_one_at_a_time_single_euclidean
-from relreps import compute_relative_coordinates, compute_relative_coordinates_euclidean
+from anchors import select_anchors_by_id, greedy_one_at_a_time_single_euclidean
+from relreps import compute_relative_coordinates, compute_relative_coordinates_euclidean, compare_latent_spaces
 
 
 # For reproducibility and consistency across runs, we set a seed
-set_random_seeds(32)
+set_random_seeds(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
@@ -29,14 +29,15 @@ load_saved = False       # Load saved embeddings from previous runs (from models
 save_run = False        # Save embeddings from current run
 latent_dim = 2         # If load_saved: Must match an existing dim
 anchor_num = 2
+repetitions = 2
 nr_runs = 1             # If load_saved: Must be <= number of saved runs for the dim
-plot_results = False
-compute_mrr = True      # Only set true if you have >32GB of RAM
+plot_results = True
+compute_mrr = False      # Only set true if you have >32GB of RAM
 
 # Hyperparameters for anchor selection
-coverage_w = 1
-diversity_w = 0.5
-exponent = 0.25
+coverage_w = 10
+diversity_w = 1
+exponent = 1
 
 ### Running experiment ###
 if load_saved:
@@ -45,26 +46,26 @@ if load_saved:
 else:
     # Run experiment
     AE_list, embeddings_list, indices_list, labels_list = train_AE(
-        num_epochs=6,
+        num_epochs=10,
         batch_size=256,
         lr=1e-3,
         device=device,      
         latent_dim=latent_dim,
-        hidden_layer=128,
+        hidden_layer=512,
         trials=nr_runs,
         save=save_run,
-        verbose=False
+        verbose=False,
+        train_loader=train_loader,
+        test_loader=test_loader
     )
-
 # Find anchors and compute relative coordinates
-train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
 random_anchor_ids = random.sample(range(len(test_loader.dataset)), 2)
 
 
 greedy_anchor_ids = greedy_one_at_a_time_single_euclidean(embeddings_list[0], indices_list[0],
-                                                          num_anchors=2, repetitions=2,
-                                                          diversity_weight=1.00, Coverage_weight=3e+2)
+                                                          num_anchors=anchor_num, repetitions=repetitions,
+                                                          diversity_weight=diversity_w, Coverage_weight=coverage_w, exponent=exponent)
 
 
 anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, greedy_anchor_ids, test_loader.dataset, show=False, device=device)
@@ -77,15 +78,12 @@ if plot_results:
         for relrep in range(len(relative_coords_list)):
             plot_3D_relreps(relative_coords_list[relrep], labels_list[relrep])
     # Plot encodings side by side
-    plot_data_list(embeddings_list, labels_list, do_pca=True, is_relrep=False)
+    plot_data_list(embeddings_list, labels_list, do_pca=False, is_relrep=False, anchors_list=anchors_list)
 
     #Nikolaj's plotting code
 
     # # # Plot rel_reps side by side with sign alignment
-    # plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
-    # anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
-    # relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
-    # plot_data_list(relative_coords_list, labels_list, do_pca=True, is_relrep=True)
+    #plot_data_list(relative_coords_list, labels_list, do_pca=False, is_relrep=True)
 
 
 ### Similarity calculations ###
@@ -100,5 +98,3 @@ if compute_mrr:
 print(f"\nMean Cosine Similarity: {mean_cos_sim:.4f}")
 print("Cosine Similarity Matrix:")
 print(cos_sim_matrix)
-
-
