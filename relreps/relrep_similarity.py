@@ -115,4 +115,15 @@ def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE
     mean_mrr = np.mean(mrr_matrix[np.triu_indices(n, k=1)])
     mean_cos_sim = np.mean(cos_sim_matrix[np.triu_indices(n, k=1)])
 
+    print("\nSimilarity Results:")
+    np.set_printoptions(precision=2, suppress=True)
+    if compute_mrr:
+        print(f"Mean Reciprocal Rank (MRR): {mean_mrr:.4f}")
+        print("MRR Matrix:")
+        print(mrr_matrix)
+
+    print(f"\nMean Cosine Similarity: {mean_cos_sim:.4f}")
+    print("Cosine Similarity Matrix:")
+    print(cos_sim_matrix)
+
     return mrr_matrix, mean_mrr, cos_sim_matrix, mean_cos_sim

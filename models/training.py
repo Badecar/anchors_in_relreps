@@ -1,17 +1,10 @@
 import os
-from utils import set_random_seeds
-from models import Autoencoder
 import numpy as np
-import torch
-import random
-import torch.nn as nn
 from data import load_mnist_data
 from utils import set_random_seeds
-from tqdm import tqdm
-from relreps import encode_relative_by_index
 
 # Train AE
-def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, save=False, verbose=False, train_loader=None, test_loader=None, seed=42):
+def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, use_test=True, save=False, verbose=False):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -20,6 +13,7 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
       4. Extract embeddings
     
     Args:
+        model (class): AE Model
         num_epochs (int): Number of training epochs.
         batch_size (int): DataLoader batch size.
         lr (float): Learning rate.
@@ -35,6 +29,7 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
     indices_list = []
     labels_list = []
     AE_list = []
+    acc_list = []
 
     # Create the directory to save embeddings if needed.
     if save:
@@ -47,12 +42,15 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
         # Create the data loaders
         # train_loader, test_loader = load_mnist_data(batch_size=batch_size)
         # Initialize and train the autoencoder
-        AE = Autoencoder(latent_dim=latent_dim, hidden_size=hidden_layer)
+        AE = model(latent_dim=latent_dim, hidden_size=hidden_layer)
         AE.to(device)
-        _, _ = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=verbose)
+        train_loss, test_loss = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=verbose)
 
         # Extract latent embeddings from the test loader
-        embeddings, indices, labels = AE.get_latent_embeddings(test_loader, device=device)
+        if use_test:
+            embeddings, indices, labels = AE.get_latent_embeddings(test_loader, device=device)
+        else:
+            embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
         # Sorting based on idx
         emb = embeddings.cpu().numpy()
         idx = indices.cpu()
@@ -69,13 +67,17 @@ def train_AE(num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 
         labels_list.append(labels_sorted)
         AE_list.append(AE)
         # Save embeddings, indices, and labels if flag is set.
+        if hasattr(model, "accuracy"):
+            acc = AE.accuracy(test_loader, device)
+            acc_list.append(acc)
+            if verbose: print(f'Accuracy of the network on the test images: {acc:.2f}%')
         
         if save:
             np.save(os.path.join(save_dir, f'embeddings_trial_{i+1}_dim{latent_dim}.npy'), embeddings.cpu().numpy())
             np.save(os.path.join(save_dir, f'indices_trial_{i+1}_dim{latent_dim}.npy'), indices.cpu().numpy())
             np.save(os.path.join(save_dir, f'labels_trial_{i+1}_dim{latent_dim}.npy'), labels.cpu().numpy())
 
-    return AE_list, embeddings_list, indices_list, labels_list
+    return AE_list, embeddings_list, indices_list, labels_list, train_loss, test_loss, acc_list
 
 def load_saved_embeddings(trials=1, latent_dim=int, save_dir=None):
     """
