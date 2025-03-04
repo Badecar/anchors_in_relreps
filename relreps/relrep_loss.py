@@ -52,7 +52,7 @@ def relrep_loss(anchor_num, anchors_list, num_epochs, AE_list, train_loader, tes
         head=head,
         anchors=anchors_list,
         distance_measure=distance_measure,
-        head_type=head_type, # Change to 'classifier' for a classifier head
+        head_type=head_type,
         device=device
     )
 

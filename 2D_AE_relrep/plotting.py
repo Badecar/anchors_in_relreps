@@ -10,9 +10,9 @@ import random
 import numpy as np
 from models import train_AE, load_saved_embeddings
 from data import load_mnist_data
-from visualization import plot_data_list, plot_3D_relreps
-from anchors import select_anchors_by_id, greedy_one_at_a_time_single_euclidean
-from relreps import compute_relative_coordinates, compute_relative_coordinates_euclidean, compare_latent_spaces
+from visualization import *
+from anchors import *
+from relreps import *
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 

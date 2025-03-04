@@ -27,7 +27,7 @@ loader = test_loader
 
 
 ### PARAMETERS ###
-model = AEClassifier
+model = AEClassifier #or Autoencoder
 head_type = 'classifier'    #decoder or classifier
 distance_measure = 'cosine'   # or 'euclidean'
 load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
