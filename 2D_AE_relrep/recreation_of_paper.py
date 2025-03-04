@@ -16,7 +16,8 @@ from anchors import *
 from relreps import *
 
 # For reproducibility and consistency across runs, we set a seed
-set_random_seeds(32)
+seed = 32
+set_random_seeds(seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
@@ -68,7 +69,10 @@ else:
         trials=nr_runs,
         use_test=False, #Must be true if we are comparing the loss with the relrep
         save=save_run,
-        verbose=False
+        verbose=False,
+        seed=seed,
+        train_loader=train_loader,
+        test_loader=test_loader
     )
 
 # Find anchors and compute relative coordinates

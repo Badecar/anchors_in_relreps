@@ -4,7 +4,7 @@ from data import load_mnist_data
 from utils import set_random_seeds
 
 # Train AE
-def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, use_test=True, save=False, verbose=False):
+def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, use_test=True, save=False, verbose=False, seed=42, train_loader=None, test_loader=None):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -37,7 +37,7 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
         os.makedirs(save_dir, exist_ok=True)
 
     for i in range(trials):
-        set_random_seeds(seed)
+        set_random_seeds(seed+i)
         print(f"Trial {i+1} of {trials}")
         # Create the data loaders
         # train_loader, test_loader = load_mnist_data(batch_size=batch_size)
