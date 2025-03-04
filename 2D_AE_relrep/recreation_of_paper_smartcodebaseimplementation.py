@@ -12,7 +12,7 @@ from models import train_AE, load_saved_embeddings
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
 from anchors import select_anchors_by_id, greedy_one_at_a_time_single_euclidean
-from relreps import compute_relative_coordinates, compute_relative_coordinates_euclidean, compare_latent_spaces
+from relreps import compute_relative_coordinates_euclidean, compute_relative_coordinates_euclidean, compare_latent_spaces
 
 
 # For reproducibility and consistency across runs, we set a seed
