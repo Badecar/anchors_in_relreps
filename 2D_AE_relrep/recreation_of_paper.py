@@ -82,27 +82,23 @@ else:
 
 # Getting Tets and Validation embeddings (sorted by index)
 emb_list_test, idx_list_test, labels_list_test = get_embeddings(test_loader, AE_list, device=device)
-emd_list_val, idx_list_val, labels_list_val = get_embeddings(val_loader, AE_list, device=device)
-
-# TODO: CONTINUE WORK FROM HERE ON IMPLEMENTING THE RIGHT DATA LOADERS. THEN IMPLEMENTING ZERO-SHOT WITH COSINE
+emb_list_val, idx_list_val, labels_list_val = get_embeddings(val_loader, AE_list, device=device)
 
 # Creates a smaller dataset from the test embeddings with balanced class counts. It is sorted by index, so each trial corresponds to each other
-smaller_dataset_embeddings, smaller_dataset_indices, smaller_dataset_labels = create_smaller_dataset(
-    emb_list_test,
-    idx_list_test,
-    labels_list_test,
+small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_dataset(
+    emb_list_val,
+    idx_list_val,
+    labels_list_val,
     samples_per_class=200
 )
-
 # Find anchors and compute relative coordinates
-# TODO: Creating the validation dataset screwed with random. Getting out of bounds IDs
-random_anchor_ids = random.sample(range(len(val_loader.dataset)), anchor_num)
-rand_anchors_list = select_anchors_by_id(AE_list, emb_list_train, idx_list_train, random_anchor_ids, test_loader.dataset, show=False, device=device)
+random_anchor_ids = random.sample(list(idx_list_val[0]), anchor_num)
+rand_anchors_list = select_anchors_by_id(AE_list, emb_list_val, idx_list_val, random_anchor_ids, val_loader.dataset, show=False, device=device)
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # Optimize anchors and compute P_anchors_list
 anchor_selector, P_anchors_list = get_optimized_anchors(
-    emb = smaller_dataset_embeddings,
+    emb = small_dataset_emb,
     anchor_num=anchor_num,
     epochs=50,
     lr=1e-1,
@@ -112,7 +108,9 @@ anchor_selector, P_anchors_list = get_optimized_anchors(
     verbose=False,
     device=device
 )
-relative_coords_list_P = compute_relative_coordinates_euclidean(smaller_dataset_embeddings, P_anchors_list, flatten=False)
+
+# USING RANDOM AND COSINE FOR ZERO-SHOT STICHING TESTS
+relative_coords_list_P = compute_relative_coordinates_euclidean(small_dataset_emb, P_anchors_list, flatten=False)
 # relative_coords_list_rand = compute_relative_coordinates_euclidean(smaller_dataset_embeddings, rand_anchors_list, flatten=False)
 
 ### ZERO-SHOT STICHING ###
@@ -195,8 +193,8 @@ if zero_shot:
 ### Plotting ###
 if plot_results:
     # Plot encodings side by side
-    plot_data_list(relative_coords_list_P, smaller_dataset_labels, do_pca=True, is_relrep=True, anchors_list=P_anchors_list)
+    plot_data_list(relative_coords_list_P, small_dataset_labels, do_pca=True, is_relrep=True, anchors_list=P_anchors_list)
 
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relative_coords_list_P, smaller_dataset_indices, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
+    compare_latent_spaces(relative_coords_list_P, small_dataset_idx, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)

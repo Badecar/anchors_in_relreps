@@ -45,29 +45,59 @@ def visualize_reconstruction_by_id(unique_id, autoencoder, dataset, device='cuda
     plt.show()
 
 
+# def visualize_image_by_idx(idx, dataset, use_flattened=True):
+#     """
+#     Visualizes a specific MNIST image given its unique index from the dataset.
+    
+#     Args:
+#         idx (int): The unique index of the image.
+#         dataset (Dataset): The MNIST dataset instance.
+#         use_flattened (bool): True if the stored image is flattened.
+#                              If True, the image will be reshaped to (28,28) for display.
+#     """
+#     # Get the image and label from the dataset
+#     image, label = dataset[idx]
+    
+#     # If the image is flattened, reshape it for visualization
+#     if use_flattened:
+#         image = image.view(28, 28)
+    
+#     plt.figure(figsize=(4, 4))
+#     plt.imshow(image.cpu(), cmap='gray')
+#     plt.title(f"Label: {label}")
+#     plt.axis("off")
+#     plt.show()
+
+
 def visualize_image_by_idx(idx, dataset, use_flattened=True):
     """
-    Visualizes a specific MNIST image given its unique index from the dataset.
+    Visualizes a specific MNIST image given its unique id from the dataset.
+    
+    Instead of assuming the image is at position idx,
+    this function iterates through the dataset to find the entry where the unique id matches idx.
     
     Args:
-        idx (int): The unique index of the image.
-        dataset (Dataset): The MNIST dataset instance.
+        idx (int): The unique id of the image.
+        dataset (Dataset): The MNIST dataset instance where each item is expected to be (image, (uid, label)).
         use_flattened (bool): True if the stored image is flattened.
                              If True, the image will be reshaped to (28,28) for display.
     """
-    # Get the image and label from the dataset
-    image, label = dataset[idx]
+    for data in dataset:
+        image, info = data
+        uid, label = info
+        if uid == idx:
+            if use_flattened:
+                image = image.view(28, 28)
+            
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(4, 4))
+            plt.imshow(image.cpu(), cmap='gray')
+            plt.title(f"Label: {label}")
+            plt.axis("off")
+            plt.show()
+            return
     
-    # If the image is flattened, reshape it for visualization
-    if use_flattened:
-        image = image.view(28, 28)
-    
-    plt.figure(figsize=(4, 4))
-    plt.imshow(image.cpu(), cmap='gray')
-    plt.title(f"Label: {label}")
-    plt.axis("off")
-    plt.show()
-
+    raise ValueError(f"Image with unique id {idx} not found in the dataset.")
 
 def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda'):
     """
