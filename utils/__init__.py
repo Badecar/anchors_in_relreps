@@ -1,5 +1,6 @@
-from .utils import set_random_seeds
+from .utils import *
 
 __all__ = [
-    'set_random_seeds'
+    'set_random_seeds',
+    'create_smaller_dataset'
 ]

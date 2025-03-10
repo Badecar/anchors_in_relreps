@@ -1,5 +1,4 @@
 import torch
-from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 
 # Visualization functions
@@ -102,6 +101,35 @@ def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda
     plt.axis("off")
     plt.show()
 
-# _, (test_loader) = load_mnist_data()
-# dataset = test_loader.dataset
-# visualize_image_by_idx(1122, dataset)
+def visualize_reconstruction_from_embedding_with_decoder(embedding, decoder, device='cuda'):
+    """
+    Visualizes the image obtained by decoding a given latent embedding using the provided decoder/head.
+    
+    Args:
+        embedding (np.array or Tensor): The latent vector of shape [latent_dim].
+        decoder (nn.Module): The trained decoder or relative head.
+        device (str): 'cpu' or 'cuda'.
+    """
+
+    decoder.eval()
+
+    # Convert embedding to a Tensor if not already and ensure it has a batch dimension.
+    if not torch.is_tensor(embedding):
+        embedding = torch.tensor(embedding, dtype=torch.float)
+    if embedding.dim() == 1:
+        embedding = embedding.unsqueeze(0)
+    
+    embedding = embedding.to(device)
+
+    with torch.no_grad():
+        # Use the decoder/head to get the output.
+        decoded = decoder(embedding)
+    
+    # Reshape the flattened output to (28,28) assuming MNIST images.
+    image = decoded.view(28, 28).cpu().numpy()
+    
+    plt.figure(figsize=(3,3))
+    plt.imshow(image, cmap='gray')
+    plt.title("Decoded Reconstruction")
+    plt.axis("off")
+    plt.show()

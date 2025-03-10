@@ -80,7 +80,7 @@ def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, comp
     
     return mrr, mean_cos_sim
 
-def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE_list=None):
+def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE_list=None,  verbose=True):
     """
     Compares latent spaces by computing the Mean Reciprocal Rank (MRR) and cosine similarity 
     between pairs of embeddings.
@@ -98,7 +98,8 @@ def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE
     mrr_matrix = np.zeros((n,n))
     cos_sim_matrix = np.zeros((n,n))
 
-    for i in tqdm(range(n), desc='Comparing latent spaces'):
+    iterator = tqdm(range(n), desc='Comparing latent spaces') if verbose else range(n)
+    for i in iterator:
         for j in range(i,n):
             mrr, cos_sim = compute_latent_similarity(
                 embeddings_list[i],

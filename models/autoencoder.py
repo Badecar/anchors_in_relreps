@@ -4,22 +4,6 @@ from tqdm import tqdm
 import torch.nn as nn
 
 
-class Anchor(nn.Module):
-    def __init__(self, N=100, N_anchors=2):
-        super().__init__()
-        self.P = nn.Parameter((N, N_anchors))
-
-    def forward(self, X):
-        """
-        X = [N, D]
-        P = [N_anchors, N]
-        out = [N_anchors, D]
-        """
-
-        return self.P @ X
-
-
-
 # AutoEncoder Class
 class Autoencoder(nn.Module):
     """
@@ -38,7 +22,10 @@ class Autoencoder(nn.Module):
             nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
             nn.Sigmoid(),
             nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, latent_dim), # the size 2 bottleneck layer
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.Sigmoid(),
+            nn.BatchNorm1d(hidden_size//2),
+            nn.Linear(hidden_size//2, latent_dim),
             nn.BatchNorm1d(latent_dim)
         ]
         self.encoder = nn.Sequential(*encoder_layers) # '*' is unpacking the list into it's elements
@@ -214,8 +201,35 @@ class Autoencoder(nn.Module):
         labels_concat  = torch.cat(labels, dim=0)
 
         return embeddings_concat, indices_concat, labels_concat
+    
+    def validate(self, data_loader, device='cuda'):
+        """
+        Runs a validation set through the autoencoder and computes 
+        the per-sample MSE along with the standard deviation.
+        
+        Args:
+            data_loader (DataLoader): DataLoader for the validation set.
+            device (str): 'cpu' or 'cuda'.
+        
+        Returns:
+            tuple: (mse_mean, mse_std) where mse_mean is the average MSE 
+                   and mse_std is the standard deviation of sample MSE.
+        """
+        self.eval()
+        losses = []
+        criterion = nn.MSELoss(reduction='none')
+        with torch.no_grad():
+            for x, _ in data_loader:
+                x = x.to(device)
+                reconstructed = self.forward(x)
+                # Compute per-sample MSE by averaging over features
+                loss = criterion(reconstructed, x).mean(dim=1)
+                losses.append(loss)
+        losses = torch.cat(losses)
+        mse_mean = losses.mean().item()
+        mse_std = losses.std().item()
+        return mse_mean, mse_std
 
-import torch.nn as nn
 
 class AEClassifier(nn.Module):
     """
