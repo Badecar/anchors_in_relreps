@@ -1,6 +1,7 @@
 import os
 import numpy as np
 from utils import set_random_seeds
+from data import sort_results
 import torch
 from models import Autoencoder
 
@@ -53,19 +54,13 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
         train_loss_list.append(train_loss)
         test_loss_list.append(test_loss)
         # Extract latent embeddings from the test loader
-        if use_test:
-            embeddings, indices, labels = AE.get_latent_embeddings(test_loader, device=device)
-        else:
-            embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
+        embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
         # Sorting based on idx
         emb = embeddings.cpu().numpy()
         idx = indices.cpu()
         lab = labels.cpu().numpy()
 
-        mask = np.argsort(idx)
-        embeddings_sorted = emb[mask]
-        idx_sorted = idx[mask]
-        labels_sorted = lab[mask]
+        embeddings_sorted, idx_sorted, labels_sorted = sort_results(emb, idx, lab)
 
         # Appending results
         embeddings_list.append(embeddings_sorted)
@@ -79,9 +74,9 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
             if verbose: print(f'Accuracy of the network on the test images: {acc:.2f}%')
         
         if save:
-            np.save(os.path.join(save_dir_emb, f'embeddings_trial_{i+1}_dim{latent_dim}.npy'), embeddings.cpu().numpy())
-            np.save(os.path.join(save_dir_emb, f'indices_trial_{i+1}_dim{latent_dim}.npy'), indices.cpu().numpy())
-            np.save(os.path.join(save_dir_emb, f'labels_trial_{i+1}_dim{latent_dim}.npy'), labels.cpu().numpy())
+            np.save(os.path.join(save_dir_emb, f'embeddings_trial_{i+1}_dim{latent_dim}.npy'), embeddings_sorted)
+            np.save(os.path.join(save_dir_emb, f'indices_trial_{i+1}_dim{latent_dim}.npy'), idx_sorted)
+            np.save(os.path.join(save_dir_emb, f'labels_trial_{i+1}_dim{latent_dim}.npy'), labels_sorted)
             torch.save(AE.state_dict(), os.path.join(save_dir_AE, f'ae_trial_{i+1}_dim{latent_dim}.pth'))
 
     return AE_list, embeddings_list, indices_list, labels_list, train_loss, test_loss, acc_list

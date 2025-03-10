@@ -10,13 +10,14 @@ import random
 import numpy as np
 from models import *
 import torch.nn as nn
-from data import load_mnist_data
+from data import *
 from visualization import *
 from anchors import *
 from relreps import *
+from tqdm import tqdm
 
 # For reproducibility and consistency across runs, we set a seed
-seed = 43
+seed = 42
 set_random_seeds(seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -46,7 +47,7 @@ diversity_w = 0.08
 exponent = 1
 
 # Post-processing
-plot_results = True
+plot_results = False
 zero_shot = False
 compute_mrr = False      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
@@ -54,17 +55,16 @@ compute_relrep_loss = False # Can only compute if not loading from save
 ### ###
 
 if load_saved:
-    embeddings_list, indices_list, labels_list = load_saved_emb(trials=nr_runs, latent_dim=latent_dim)
+    emb_list_train, idx_list_train, labels_list_train = load_saved_emb(trials=nr_runs, latent_dim=latent_dim)
     AE_list = load_AE_models(model=model, trials=nr_runs, latent_dim=latent_dim, hidden_layer=128, device=device)
     if AE_list is None:
         print("No AE model found. Initializing empty AE list.")
-        AE_list = np.zeros(nr_runs) # Initializing an empty AE list to use in select_anchors_by_id (needed for plotting only)
-    acc_list = np.zeros(nr_runs)
-    train_loss_list_AE = np.zeros(nr_runs)
-    test_loss_list_AE = np.zeros(nr_runs)
+        AE_list = np.zeros(nr_runs) # Initializing an empty AE list to use in select_anchors_by_id
+    # Initializing empty lists as to not break the code below
+    acc_list, train_loss_list_AE,test_loss_list_AE = np.zeros(nr_runs), np.zeros(nr_runs), np.zeros(nr_runs)
 else:
-    # Run experiment
-    AE_list, embeddings_list, indices_list, labels_list, train_loss_list_AE, test_loss_list_AE, acc_list = train_AE(
+    # Run experiment. Return the Train embeddings
+    AE_list, emb_list_train, idx_list_train, labels_list_train, train_loss_list_AE, test_loss_list_AE, acc_list = train_AE(
         model=model,
         num_epochs=num_epochs,
         batch_size=256,
@@ -73,7 +73,6 @@ else:
         latent_dim=latent_dim,
         hidden_layer=128,
         trials=nr_runs,
-        use_test=False, #Must be true if we are comparing the loss with the relrep
         save=save_run,
         verbose=False,
         seed=seed,
@@ -81,18 +80,24 @@ else:
         test_loader=test_loader
     )
 
-# Creates a smaller dataset from the train embeddings with balanced class counts. It is sorted by index, so each trial corresponds to each other
+# Getting Tets and Validation embeddings (sorted by index)
+emb_list_test, idx_list_test, labels_list_test = get_embeddings(test_loader, AE_list, device=device)
+emd_list_val, idx_list_val, labels_list_val = get_embeddings(val_loader, AE_list, device=device)
+
+# TODO: CONTINUE WORK FROM HERE ON IMPLEMENTING THE RIGHT DATA LOADERS. THEN IMPLEMENTING ZERO-SHOT WITH COSINE
+
+# Creates a smaller dataset from the test embeddings with balanced class counts. It is sorted by index, so each trial corresponds to each other
 smaller_dataset_embeddings, smaller_dataset_indices, smaller_dataset_labels = create_smaller_dataset(
-    embeddings_list,
-    indices_list,
-    labels_list,
+    emb_list_test,
+    idx_list_test,
+    labels_list_test,
     samples_per_class=200
 )
 
 # Find anchors and compute relative coordinates
 # TODO: Creating the validation dataset screwed with random. Getting out of bounds IDs
-# random_anchor_ids = random.sample(range(len(test_loader.dataset)), anchor_num)
-# rand_anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
+random_anchor_ids = random.sample(range(len(val_loader.dataset)), anchor_num)
+rand_anchors_list = select_anchors_by_id(AE_list, emb_list_train, idx_list_train, random_anchor_ids, test_loader.dataset, show=False, device=device)
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # Optimize anchors and compute P_anchors_list
@@ -194,5 +199,4 @@ if plot_results:
 
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    print("Computing similarity for P")
     compare_latent_spaces(relative_coords_list_P, smaller_dataset_indices, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)

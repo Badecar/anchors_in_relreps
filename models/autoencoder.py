@@ -200,7 +200,13 @@ class Autoencoder(nn.Module):
         indices_concat = torch.cat(indices, dim=0)
         labels_concat  = torch.cat(labels, dim=0)
 
-        return embeddings_concat, indices_concat, labels_concat
+        # Sort based on indices
+        sorted_order = torch.argsort(indices_concat)
+        embeddings_sorted = embeddings_concat[sorted_order]
+        indices_sorted = indices_concat[sorted_order]
+        labels_sorted = labels_concat[sorted_order]
+
+        return embeddings_sorted, indices_sorted, labels_sorted
     
     def validate(self, data_loader, device='cuda'):
         """
