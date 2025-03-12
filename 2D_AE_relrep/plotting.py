@@ -8,9 +8,13 @@ from utils import set_random_seeds
 import torch
 import random
 import numpy as np
+from models import train_AE, load_saved_emb
 from models import *
 import torch.nn as nn
 from data import load_mnist_data
+from visualization import *
+from anchors import *
+from relreps import *
 from anchors import *
 from relreps import *
 import matplotlib.pyplot as plt
@@ -24,10 +28,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 
 # Load data for plotting
-train_loader, test_loader = load_mnist_data()
+train_loader, test_loader, val_loader = load_mnist_data()
 
 ### PARAMETERS ###
-load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
+load_saved_emb = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = False        # Save embeddings from current run
 latent_dim = 2         
 anchor_num = 2

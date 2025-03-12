@@ -8,7 +8,7 @@ from utils import set_random_seeds
 import torch
 import random
 import numpy as np
-from models import train_AE, load_saved_embeddings
+from models import train_AE, load_saved_emb
 from data import load_mnist_data
 from visualization import plot_data_list, plot_3D_relreps
 from anchors import select_anchors_by_id, greedy_one_at_a_time_single_euclidean
@@ -22,10 +22,10 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 
 # Load data for plotting
-train_loader, test_loader = load_mnist_data()
+train_loader, test_loader, val_loader = load_mnist_data()
 
 ### PARAMETERS ###
-load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
+load_saved_emb = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = False        # Save embeddings from current run
 latent_dim = 2         # If load_saved: Must match an existing dim
 anchor_num = 2
@@ -40,8 +40,8 @@ diversity_w = 1
 exponent = 1
 
 ### Running experiment ###
-if load_saved:
-    embeddings_list, indices_list, labels_list = load_saved_embeddings(trials=nr_runs, latent_dim=latent_dim)
+if load_saved_emb:
+    embeddings_list, indices_list, labels_list = load_saved_emb(trials=nr_runs, latent_dim=latent_dim)
     AE_list = np.zeros(nr_runs) # Initializing an empty AE list to use in select_anchors_by_id (needed for plotting only)
 else:
     # Run experiment

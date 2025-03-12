@@ -30,6 +30,7 @@ def select_anchors_by_id(AE_list, embeddings_list, indices_list, desired_ids, da
             
             # If show flag is set, display the corresponding image from the dataset and the reconstruction
             if show:
+                print(f"uid: {uid}")
                 visualize_image_by_idx(uid,dataset,use_flattened=True)
                 visualize_reconstruction_from_embedding(embeddings[idx[0]],AE,device)
         

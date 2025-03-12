@@ -1,7 +1,10 @@
 import os
 import numpy as np
-from data import load_mnist_data
 from utils import set_random_seeds
+from data import sort_results
+import torch
+from models import Autoencoder, AEClassifier
+
 
 # Train AE
 def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
@@ -25,41 +28,45 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
         embeddings (Tensor): Latent embeddings from the test (or train) set.
         anchors (Tensor): (Optional) set of anchor embeddings if you implement that step here.
     """
+    print("Training AE models")
     embeddings_list = []
     indices_list = []
     labels_list = []
     AE_list = []
     acc_list = []
+    train_loss_list = []
+    test_loss_list = []
 
     # Create the directory to save embeddings if needed.
+    
     if save:
-        save_dir = os.path.join("models", "saved_embeddings", f"dim{latent_dim}")
-        os.makedirs(save_dir, exist_ok=True)
+        if model == AEClassifier:
+                m = 'AEClassifier'
+        else:
+                m = 'AE'
+        save_dir_emb = os.path.join("models", "saved_embeddings", m, f"dim{latent_dim}")
+        save_dir_AE = os.path.join("models", "saved_models", m, f"dim{latent_dim}")
+        os.makedirs(save_dir_AE, exist_ok=True)
+        os.makedirs(save_dir_emb, exist_ok=True)
 
     for i in range(trials):
         if verbose:
             print(f"Trial {i+1} of {trials}")
         # Create the data loaders
-        # train_loader, test_loader = load_mnist_data(batch_size=batch_size)
         # Initialize and train the autoencoder
         AE = model(latent_dim=latent_dim, hidden_size=hidden_layer)
         AE.to(device)
         train_loss, test_loss = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=verbose)
-
+        train_loss_list.append(train_loss)
+        test_loss_list.append(test_loss)
         # Extract latent embeddings from the test loader
-        if use_test:
-            embeddings, indices, labels = AE.get_latent_embeddings(test_loader, device=device)
-        else:
-            embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
+        embeddings, indices, labels = AE.get_latent_embeddings(train_loader, device=device)
         # Sorting based on idx
         emb = embeddings.cpu().numpy()
         idx = indices.cpu()
         lab = labels.cpu().numpy()
 
-        mask = np.argsort(idx)
-        embeddings_sorted = emb[mask]
-        idx_sorted = idx[mask]
-        labels_sorted = lab[mask]
+        embeddings_sorted, idx_sorted, labels_sorted = sort_results(emb, idx, lab)
 
         # Appending results
         embeddings_list.append(embeddings_sorted)
@@ -73,13 +80,14 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
             if verbose: print(f'Accuracy of the network on the test images: {acc:.2f}%')
         
         if save:
-            np.save(os.path.join(save_dir, f'embeddings_trial_{i+1}_dim{latent_dim}.npy'), embeddings.cpu().numpy())
-            np.save(os.path.join(save_dir, f'indices_trial_{i+1}_dim{latent_dim}.npy'), indices.cpu().numpy())
-            np.save(os.path.join(save_dir, f'labels_trial_{i+1}_dim{latent_dim}.npy'), labels.cpu().numpy())
+            np.save(os.path.join(save_dir_emb, f'embeddings_trial_{i+1}_dim{latent_dim}.npy'), embeddings_sorted)
+            np.save(os.path.join(save_dir_emb, f'indices_trial_{i+1}_dim{latent_dim}.npy'), idx_sorted)
+            np.save(os.path.join(save_dir_emb, f'labels_trial_{i+1}_dim{latent_dim}.npy'), labels_sorted)
+            torch.save(AE.state_dict(), os.path.join(save_dir_AE, f'ae_trial_{i+1}_dim{latent_dim}.pth'))
 
     return AE_list, embeddings_list, indices_list, labels_list, train_loss, test_loss, acc_list
 
-def load_saved_embeddings(trials=1, latent_dim=int, save_dir=None):
+def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
     """
     Loads saved embeddings, indices, and labels from the saved embeddings directory.
     
@@ -94,8 +102,13 @@ def load_saved_embeddings(trials=1, latent_dim=int, save_dir=None):
             - indices_list (list of np.ndarray): Loaded indices from each trial.
             - labels_list (list of np.ndarray): Loaded labels from each trial.
     """
+    print("Loading saved embeddings and models")
+    if model == Autoencoder:
+        m = 'AE'
+    else:
+        m = 'AEClassifier'
     if save_dir is None:
-        save_dir = os.path.join("models", "saved_embeddings", f"dim{latent_dim}")
+        save_dir = os.path.join("models", "saved_embeddings", m, f"dim{latent_dim}")
     
     embeddings_list = []
     indices_list = []
@@ -106,39 +119,51 @@ def load_saved_embeddings(trials=1, latent_dim=int, save_dir=None):
         idx_path = os.path.join(save_dir, f'indices_trial_{i+1}_dim{latent_dim}.npy')
         lab_path = os.path.join(save_dir, f'labels_trial_{i+1}_dim{latent_dim}.npy')
         
-        # Load the saved .npy files
-        embeddings = np.load(emb_path)
-        indices = np.load(idx_path)
-        labels = np.load(lab_path)
-        
-        embeddings_list.append(embeddings)
-        indices_list.append(indices)
-        labels_list.append(labels)
+        # Check if the saved files exist, if not, throw an error and stop program execution.
+        if not (os.path.exists(emb_path) and os.path.exists(idx_path) and os.path.exists(lab_path)):
+            raise FileNotFoundError(f"Saved data not found for trial {i+1}. Expected files are missing in {save_dir}, file: {emb_path}.")
+        else:
+            # Load the saved .npy files
+            embeddings = np.load(emb_path)
+            indices = np.load(idx_path)
+            labels = np.load(lab_path)
+
+            embeddings_list.append(embeddings)
+            indices_list.append(indices)
+            labels_list.append(labels)
         
     return embeddings_list, indices_list, labels_list
 
-
-def train_on_relrep(model, relreps, train_loader, test_loader, num_epochs=5, lr=1e-3, device='cuda', latent_dim = 2, verbose=False):
-    for param in model.encoder.parameters():
-        param.requires_grad = False
+def load_AE_models(model, trials=1, latent_dim=2, hidden_layer=128, save_dir_AE=None, device='cuda'):
+    """
+    Loads a specified number of saved AE (or AEClassifier) models into a list.
     
-    optimizer = torch.optim.Adam(model.decoder.parameters(), lr=lr) # change model to anchors parameters
-
-    loss_function = nn.MSELoss()
-    model.train()
-
-    for epoch in tqdm(range(num_epochs), desc="Training Epochs"):
-        epoch_loss = 0.0
-        for x, _ in train_loader:
-            x = x.to(device)
-
-            # Forward pass
-            
-
-
-            # Test loss
-            test_loss = self.evaluate(test_loader, criterion=loss_function, device=device)
-            test_loss_list.append(test_loss)
-            if verbose:
-                print(f'Epoch #{epoch}')
-                print(f'Train Loss = {train_loss:.3e} --- Test Loss = {test_loss:.3e}')
+    Args:
+        model (class): The model class to load (e.g., Autoencoder or AEClassifier).
+        trials (int): The number of saved model trials to load.
+        latent_dim (int): The latent dimensionality (must match the saved models).
+        hidden_layer (int): Size of the hidden layer.
+        save_dir_AE (str): Directory where the saved models are located. 
+                           If None, defaults to "models/saved_models/dim{latent_dim}".
+        device (str): Device to load the model ('cpu' or 'cuda').
+        
+    Returns:
+        list: A list of loaded models. Models not found will be skipped.
+    """
+    if model == Autoencoder:
+        m = 'AE'
+    else:
+        m = 'AEClassifier'
+    if save_dir_AE is None:
+        save_dir_AE = os.path.join("models", "saved_models", m, f"dim{latent_dim}")
+    AE_list = []
+    for i in range(1, trials + 1):
+        model_path = os.path.join(save_dir_AE, f'ae_trial_{i}_dim{latent_dim}.pth')
+        if os.path.exists(model_path):
+            loaded_model = model(latent_dim=latent_dim, hidden_size=hidden_layer)
+            loaded_model.load_state_dict(torch.load(model_path, map_location=device))
+            loaded_model.to(device)
+            AE_list.append(loaded_model)
+        else:
+            print(f"Saved model for trial {i} not found at {model_path}. Skipping.")
+    return AE_list

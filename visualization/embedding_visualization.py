@@ -81,7 +81,7 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
         axs[i].set_xlabel('PC 1')
         axs[i].set_ylabel('PC 2')
         if is_relrep:
-            axs[i].set_title(f'2D PCA of Related Reps {i+1}')
+            axs[i].set_title(f'2D PCA of Relative Representations {i+1}')
         else:
             axs[i].set_title(f'2D PCA of AE Encodings {i+1}')
     

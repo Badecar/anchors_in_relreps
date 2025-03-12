@@ -1,5 +1,4 @@
 import torch
-from torch.utils.data import Dataset
 import matplotlib.pyplot as plt
 
 # Visualization functions
@@ -46,29 +45,59 @@ def visualize_reconstruction_by_id(unique_id, autoencoder, dataset, device='cuda
     plt.show()
 
 
+# def visualize_image_by_idx(idx, dataset, use_flattened=True):
+#     """
+#     Visualizes a specific MNIST image given its unique index from the dataset.
+    
+#     Args:
+#         idx (int): The unique index of the image.
+#         dataset (Dataset): The MNIST dataset instance.
+#         use_flattened (bool): True if the stored image is flattened.
+#                              If True, the image will be reshaped to (28,28) for display.
+#     """
+#     # Get the image and label from the dataset
+#     image, label = dataset[idx]
+    
+#     # If the image is flattened, reshape it for visualization
+#     if use_flattened:
+#         image = image.view(28, 28)
+    
+#     plt.figure(figsize=(4, 4))
+#     plt.imshow(image.cpu(), cmap='gray')
+#     plt.title(f"Label: {label}")
+#     plt.axis("off")
+#     plt.show()
+
+
 def visualize_image_by_idx(idx, dataset, use_flattened=True):
     """
-    Visualizes a specific MNIST image given its unique index from the dataset.
+    Visualizes a specific MNIST image given its unique id from the dataset.
+    
+    Instead of assuming the image is at position idx,
+    this function iterates through the dataset to find the entry where the unique id matches idx.
     
     Args:
-        idx (int): The unique index of the image.
-        dataset (Dataset): The MNIST dataset instance.
+        idx (int): The unique id of the image.
+        dataset (Dataset): The MNIST dataset instance where each item is expected to be (image, (uid, label)).
         use_flattened (bool): True if the stored image is flattened.
                              If True, the image will be reshaped to (28,28) for display.
     """
-    # Get the image and label from the dataset
-    image, label = dataset[idx]
+    for data in dataset:
+        image, info = data
+        uid, label = info
+        if uid == idx:
+            if use_flattened:
+                image = image.view(28, 28)
+            
+            import matplotlib.pyplot as plt
+            plt.figure(figsize=(4, 4))
+            plt.imshow(image.cpu(), cmap='gray')
+            plt.title(f"Label: {label}")
+            plt.axis("off")
+            plt.show()
+            return
     
-    # If the image is flattened, reshape it for visualization
-    if use_flattened:
-        image = image.view(28, 28)
-    
-    plt.figure(figsize=(4, 4))
-    plt.imshow(image.cpu(), cmap='gray')
-    plt.title(f"Label: {label}")
-    plt.axis("off")
-    plt.show()
-
+    raise ValueError(f"Image with unique id {idx} not found in the dataset.")
 
 def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda'):
     """
@@ -102,6 +131,35 @@ def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda
     plt.axis("off")
     plt.show()
 
-# _, (test_loader) = load_mnist_data()
-# dataset = test_loader.dataset
-# visualize_image_by_idx(1122, dataset)
+def visualize_reconstruction_from_embedding_with_decoder(embedding, decoder, device='cuda'):
+    """
+    Visualizes the image obtained by decoding a given latent embedding using the provided decoder/head.
+    
+    Args:
+        embedding (np.array or Tensor): The latent vector of shape [latent_dim].
+        decoder (nn.Module): The trained decoder or relative head.
+        device (str): 'cpu' or 'cuda'.
+    """
+
+    decoder.eval()
+
+    # Convert embedding to a Tensor if not already and ensure it has a batch dimension.
+    if not torch.is_tensor(embedding):
+        embedding = torch.tensor(embedding, dtype=torch.float)
+    if embedding.dim() == 1:
+        embedding = embedding.unsqueeze(0)
+    
+    embedding = embedding.to(device)
+
+    with torch.no_grad():
+        # Use the decoder/head to get the output.
+        decoded = decoder(embedding)
+    
+    # Reshape the flattened output to (28,28) assuming MNIST images.
+    image = decoded.view(28, 28).cpu().numpy()
+    
+    plt.figure(figsize=(3,3))
+    plt.imshow(image, cmap='gray')
+    plt.title("Decoded Reconstruction")
+    plt.axis("off")
+    plt.show()
