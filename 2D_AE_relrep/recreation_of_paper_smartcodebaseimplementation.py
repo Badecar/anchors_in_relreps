@@ -17,6 +17,7 @@ from anchors import select_anchors_by_id, compute_relative_coordinates, objectiv
 
 # For reproducibility and consistency across runs, we set a seed
 set_random_seeds(42)
+train_loader, test_loader, val_loader = load_mnist_data()
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}")
@@ -28,15 +29,16 @@ AE_list, embeddings_list, indices_list, labels_list = train_AE(
     batch_size=256,
     lr=1e-3,
     device=device,      
-    latent_dim=3,
+    latent_dim=10,
     hidden_layer=128,
-    trials=1
+    trials=2,
+    train_loader=train_loader,
+    test_loader=test_loader,
 )
 
 # Find anchors and compute relative coordinates
-train_loader, test_loader = load_mnist_data()
 predefined_anchor_ids = [101, 205]
-random_anchor_ids = random.sample(range(len(test_loader.dataset)), 3)
+random_anchor_ids = random.sample(range(len(test_loader.dataset)), 10)
 anchors_list = select_anchors_by_id(AE_list, embeddings_list, indices_list, random_anchor_ids, test_loader.dataset, show=False, device=device)
 relative_coords_list = compute_relative_coordinates(embeddings_list, anchors_list, flatten=False)
 
