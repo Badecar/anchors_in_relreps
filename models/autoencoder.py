@@ -15,17 +15,42 @@ class Autoencoder(nn.Module):
     # Might have to use batchnorm to impose a structure on the latent space
 
     def __init__(self, latent_dim=2, hidden_size=128):
+        # super().__init__()
+        # # Encoder layers
+        # # 784 -> 128 -> 2
+        # encoder_layers = [
+        #     nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
+        #     nn.Sigmoid(),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.Linear(hidden_size, hidden_size//2),
+        #     nn.Sigmoid(),
+        #     nn.BatchNorm1d(hidden_size//2),
+        #     nn.Linear(hidden_size//2, latent_dim),
+        #     nn.BatchNorm1d(latent_dim)
+        # ]
+        # self.encoder = nn.Sequential(*encoder_layers) # '*' is unpacking the list into it's elements
+
+        # # Decoder layers
+        # # 2 -> 128 -> 784
+        # decoder_layers = [
+        #     nn.Linear(latent_dim, hidden_size),
+        #     nn.ReLU(),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.Linear(hidden_size, 28 * 28),
+        #     nn.Sigmoid() # normalize outputs to [0, 1] - grayscale
+        # ]
+        # self.decoder = nn.Sequential(*decoder_layers)
+        
+
+        ## OLD AE FROM WHEN WE WERE TESTING ##
         super().__init__()
         # Encoder layers
         # 784 -> 128 -> 2
         encoder_layers = [
             nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
-            nn.Sigmoid(),
+            nn.ReLU(),
             nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, hidden_size//2),
-            nn.Sigmoid(),
-            nn.BatchNorm1d(hidden_size//2),
-            nn.Linear(hidden_size//2, latent_dim),
+            nn.Linear(hidden_size, latent_dim),
             nn.BatchNorm1d(latent_dim)
         ]
         self.encoder = nn.Sequential(*encoder_layers) # '*' is unpacking the list into it's elements
@@ -39,10 +64,10 @@ class Autoencoder(nn.Module):
             nn.Linear(hidden_size, 28 * 28),
             nn.Sigmoid() # normalize outputs to [0, 1] - grayscale
         ]
+
         self.decoder = nn.Sequential(*decoder_layers)
 
-        # Classifier Layers
-        # 2 -> 128 -> 
+        
 
     def encode(self, x):
         """
@@ -246,11 +271,21 @@ class AEClassifier(nn.Module):
     def __init__(self, latent_dim=2, hidden_size=128, num_classes=10):
         super().__init__()
         # Encoder layers (same as in the Autoencoder)
+        # encoder_layers = [
+        #     nn.Linear(28 * 28, hidden_size),  # assuming 28x28 images
+        #     nn.Sigmoid(),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.Linear(hidden_size, latent_dim),  # bottleneck
+        #     nn.BatchNorm1d(latent_dim)
+        # ]
+        # self.encoder = nn.Sequential(*encoder_layers)
+
+        # OLD VERSION OF AE ENCODER
         encoder_layers = [
-            nn.Linear(28 * 28, hidden_size),  # assuming 28x28 images
-            nn.Sigmoid(),
+            nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
+            nn.ReLU(),
             nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, latent_dim),  # bottleneck
+            nn.Linear(hidden_size, latent_dim),
             nn.BatchNorm1d(latent_dim)
         ]
         self.encoder = nn.Sequential(*encoder_layers)
@@ -346,7 +381,7 @@ class AEClassifier(nn.Module):
                 print(f"Epoch {epoch}: Train Loss = {train_loss:.3e}, Test Loss = {test_loss:.3e}, Test Acc = {acc*100:.2f}%")
         return train_loss_list, test_loss_list
     
-    def get_latent_embeddings(self, data_loader, device='cuda'):
+    def get_latent_embeddings(self, data_loader, device='cpu'):
         """
         Passes the entire dataset through the encoder to extract latent vectors.
         
@@ -376,4 +411,10 @@ class AEClassifier(nn.Module):
         indices_concat = torch.cat(indices, dim=0)
         labels_concat  = torch.cat(labels, dim=0)
 
-        return embeddings_concat, indices_concat, labels_concat
+        # Sort based on indices
+        sorted_order = torch.argsort(indices_concat)
+        embeddings_sorted = embeddings_concat[sorted_order]
+        indices_sorted = indices_concat[sorted_order]
+        labels_sorted = labels_concat[sorted_order]
+
+        return embeddings_sorted, indices_sorted, labels_sorted

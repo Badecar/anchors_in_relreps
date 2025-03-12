@@ -25,17 +25,21 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 
 # Load data
 train_loader, test_loader, val_loader = load_mnist_data()
-loader = test_loader
+loader = val_loader
+use_small_dataset = False
+### MAKE SURE THAT WE ARE USING THE SAME DATA FOR ALL FUNCTIONS ###
+
+# TODO: CURRENTLY USING OLD VERSION OF THE AE FOR TESTING. NEED TO UPDATE TO NEW VERSION
 
 ### PARAMETERS ###
-model = Autoencoder #or Autoencoder
+model = Autoencoder #AEClassifier or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
-distance_measure = 'euclidean'   # or 'euclidean'
+distance_measure = 'cosine'   #cosine or euclidean
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
 latent_dim = 10         # If load_saved: Must match an existing dim
 anchor_num = 10
-nr_runs = 3             # If load_saved: Must be <= number of saved runs for the dim
+nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
 num_epochs = 7
@@ -47,7 +51,7 @@ diversity_w = 0.08
 exponent = 1
 
 # Post-processing
-plot_results = False
+plot_results = True
 zero_shot = False
 compute_mrr = False      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
@@ -55,7 +59,7 @@ compute_relrep_loss = False # Can only compute if not loading from save
 ### ###
 
 if load_saved:
-    emb_list_train, idx_list_train, labels_list_train = load_saved_emb(trials=nr_runs, latent_dim=latent_dim)
+    emb_list_train, idx_list_train, labels_list_train = load_saved_emb(model, trials=nr_runs, latent_dim=latent_dim)
     AE_list = load_AE_models(model=model, trials=nr_runs, latent_dim=latent_dim, hidden_layer=128, device=device)
     if AE_list is None:
         print("No AE model found. Initializing empty AE list.")
@@ -81,19 +85,23 @@ else:
     )
 
 # Getting Tets and Validation embeddings (sorted by index)
-emb_list_test, idx_list_test, labels_list_test = get_embeddings(test_loader, AE_list, device=device)
-emb_list_val, idx_list_val, labels_list_val = get_embeddings(val_loader, AE_list, device=device)
+print("Getting embeddings for test and validation set")
+emb_list, idx_list, labels_list = get_embeddings(loader, AE_list, device=device)
 
 # Creates a smaller dataset from the test embeddings with balanced class counts. It is sorted by index, so each trial corresponds to each other
 small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_dataset(
-    emb_list_val,
-    idx_list_val,
-    labels_list_val,
+    emb_list,
+    idx_list,
+    labels_list,
     samples_per_class=200
 )
+
+if use_small_dataset:
+    emb_list, idx_list, labels_list = small_dataset_emb, small_dataset_idx, small_dataset_labels
+
 # Find anchors and compute relative coordinates
-random_anchor_ids = random.sample(list(idx_list_val[0]), anchor_num)
-rand_anchors_list = select_anchors_by_id(AE_list, emb_list_val, idx_list_val, random_anchor_ids, val_loader.dataset, show=False, device=device)
+random_anchor_ids = random.sample(list(idx_list[0]), anchor_num)
+rand_anchors_list = select_anchors_by_id(AE_list, emb_list, idx_list, random_anchor_ids, loader.dataset, show=False, device=device)
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # Optimize anchors and compute P_anchors_list
@@ -110,14 +118,15 @@ anchor_selector, P_anchors_list = get_optimized_anchors(
 )
 
 # USING RANDOM AND COSINE FOR ZERO-SHOT STICHING TESTS
-relative_coords_list_P = compute_relative_coordinates_euclidean(small_dataset_emb, P_anchors_list, flatten=False)
-# relative_coords_list_rand = compute_relative_coordinates_euclidean(smaller_dataset_embeddings, rand_anchors_list, flatten=False)
+anch_list = rand_anchors_list
+relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
+anch_rel = compute_relative_coordinates_cossim(rand_anchors_list, anch_list) # Computing relrep for anchors
 
 ### ZERO-SHOT STICHING ###
 if zero_shot:
     print("Performing zero-shot stitching")
     # 1. Regular autoencoder validation on the first AE
-    mse_reg, mse_std_reg = AE_list[0].validate(val_loader, device=device)
+    mse_reg, mse_std_reg = AE_list[0].validate(loader, device=device)
     print("Regular AE Validation MSE: {:.5f} ± {:.5f}".format(mse_reg, mse_std_reg))
 
     # 2. Train the relative decoder using the first AE (freeze its encoder)
@@ -141,19 +150,9 @@ if zero_shot:
     print("Relative decoder training complete.")
 
     # 3. Evaluate every AE using the trained relative decoder
-    # Gather latent embeddings from the validation set for each AE using AE.get_latent_embeddings()
-    val_embeddings_list = []
-    val_indices_list = []
-    val_labels_list = []
-    for ae in AE_list:
-        val_embeddings, val_indices, val_labels = ae.get_latent_embeddings(val_loader, device=device)
-        val_embeddings_list.append(val_embeddings.cpu().numpy())
-        val_indices_list.append(val_indices.cpu().numpy())
-        val_labels_list.append(val_labels.cpu().numpy())
-
     # Optimize anchors using the validation embeddings from each AE
     anchor_selector_val, P_anchors_list_val = get_optimized_anchors(
-        emb=val_embeddings_list,
+        emb=emb_list,
         anchor_num=anchor_num,
         epochs=50,
         lr=1e-1,
@@ -165,15 +164,15 @@ if zero_shot:
     )
 
     # TODO: THEY DO NOT LOOK LIKE THEY ARE SORTED PROPERLY WHEN 
-    relative_coords_list_P_val = compute_relative_coordinates_euclidean(val_embeddings_list, P_anchors_list_val)
+    relative_coords_list_P_val = compute_relative_coordinates_euclidean(emb_list, P_anchors_list_val)
     print("Comparing cosine similarity of validation relreps")
-    compare_latent_spaces(relative_coords_list_P_val, val_indices_list, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
-    plot_data_list(val_embeddings_list, val_labels_list, do_pca=True, is_relrep=False, anchors_list=P_anchors_list_val)
-    plot_data_list(relative_coords_list_P_val, val_labels_list, do_pca=True, is_relrep=True)
+    compare_latent_spaces(relative_coords_list_P_val, idx_list, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
+    plot_data_list(emb_list, labels_list, do_pca=True, is_relrep=False, anchors_list=P_anchors_list_val)
+    plot_data_list(relative_coords_list_P_val, labels_list, do_pca=True, is_relrep=True)
 
     # Prepare the ground truth images from the validation set (if not already available)
     all_val_images = []
-    for x, _ in val_loader:
+    for x, _ in loader:
         all_val_images.append(x.to(device))
     all_val_images = torch.cat(all_val_images, dim=0)
     all_val_images_flat = all_val_images.view(all_val_images.size(0), -1)
@@ -193,8 +192,20 @@ if zero_shot:
 ### Plotting ###
 if plot_results:
     # Plot encodings side by side
-    plot_data_list(relative_coords_list_P, small_dataset_labels, do_pca=True, is_relrep=True, anchors_list=P_anchors_list)
+    # is_relrep = True
+    # if is_relrep:
+    #     print("Plotting relrep")
+    #     plot_data_list(relrep_list, labels_list, do_pca=False, is_relrep=is_relrep, anchors_list=anch_rel)
+    # else:
+    #     print("Plotting absolute embeddings")
+    #     plot_data_list(emb_list, labels_list, do_pca=True, is_relrep=is_relrep, anchors_list=rand_anchors_list)
+    print("Plotting absolute embeddings")
+    plot_data_list(emb_list, labels_list, do_pca=True, is_relrep=False, anchors_list=rand_anchors_list)
+    print("Plotting relrep")
+    plot_data_list(relrep_list, labels_list, do_pca=True, is_relrep=True, anchors_list=anch_rel)
+
+
 
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relative_coords_list_P, small_dataset_idx, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
+    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
