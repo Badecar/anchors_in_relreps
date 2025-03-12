@@ -167,7 +167,7 @@ def greedy_one_at_a_time_single_cossim(embeddings, indices, num_anchors, Coverag
 
     return anchors_idx
 
-def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=1, repetitions=1):
+def greedy_one_at_a_time_single_euclidean(embeddings_list, indices_list, num_anchors, Coverage_weight=1, diversity_weight=1, exponent=1, repetitions=1, verbose=True):
     """
     Select anchors greedily by maximizing a trade-off between diversity and coverage,
     using Euclidean distances.
@@ -187,18 +187,12 @@ def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Cove
     Returns:
       anchors_idx: list of selected indices.
     """
-    embeddings = np.array(embeddings)  # shape (n, d)
-    indices = np.array(indices)
+    indices_list = [np.array(indices) for indices in indices_list]
+    indices = indices_list[0]
     
     # Randomly select the first anchor.
     anchors_idx = []
-    init_idx = random.sample(list(indices), 1)[0]
-    anchors_idx.append(init_idx)
 
-    # Compute initial Euclidean distances from all embeddings to the first anchor.
-    chosen_anchor = embeddings[init_idx]  # shape (d,)
-    min_dists = np.linalg.norm(embeddings - chosen_anchor, axis=1)  # shape (n,)
-    all_ids = np.array(indices)
     def compute_diversity(anchor_array, exponent=1):
         """
         Compute diversity as the sum of pairwise Euclidean distances (raised to the exponent)
@@ -210,52 +204,94 @@ def greedy_one_at_a_time_single_euclidean(embeddings, indices, num_anchors, Cove
         n_pairs = len(pairwise_distances)
         return np.mean(pairwise_distances) / n_pairs
     # Greedily add anchors.
-    for _ in tqdm(range(num_anchors*repetitions - 1), desc="Selecting anchors"):
+    for _ in tqdm(range(num_anchors*repetitions), desc="Selecting anchors", disable=not(verbose)):
+        if _ == 0:
+            init_idx = random.sample(list(indices_list[0]), 1)[0]
+            init_idx_multiple = [np.where(indices_temp == init_idx)[0] for indices_temp in indices_list]
+            anchors_idx.append(init_idx)
+
+            # Compute initial Euclidean distances from all embeddings to the first anchor.
+            chosen_anchors = [[embeddings[init_idx]] for embeddings, idx in zip(embeddings_list, init_idx_multiple)]  # shape (d,)
+            min_dists_list = [np.linalg.norm(embeddings - chosen_anchor, axis=1) for embeddings, chosen_anchor in zip(embeddings_list, chosen_anchors)]  # shape (n,)
+            all_ids = np.array(indices)
+            continue
+
         best_index = None
         best_score = -np.inf
         best_new_min_dists = None
-        
         # Evaluate each candidate index not already selected.
-        for candidate_vec, idx in zip(embeddings, indices):
+        """
+        only loop through the indices to simplify the loop
+        """
+        for idx in tqdm(indices, desc="checking indices", disable=True):
             if idx in anchors_idx:
                 continue
             
+            """
+            make a list of the vectors with a given index
+            """
+            # TODO
+            candidate_vec_list = []
+
+            for embedding, ids in zip(embeddings_list, indices_list):
+                candidate_vec_list.append(np.array(embedding[ids == idx][0]))
             # Compute Euclidean distances from all embeddings to this candidate.
-            candidate_dists = np.linalg.norm(embeddings - candidate_vec, axis=1)
-            
+            """
+            make candidate_dists into a list, with a element for each embedding sapce
+            """
+            candidate_dists_list = [np.linalg.norm(embeddings - candidate_vec, axis=1) for embeddings, candidate_vec in zip(embeddings_list, candidate_vec_list)]
             # New minimum distances if candidate were added.
-            new_min_dists = np.minimum(min_dists, candidate_dists)
+            """
+            make new_min_dists into a list of the new minium distances in each embedding space
+            """
+            new_min_dists_list = [np.minimum(min_dists, candidate_dists) for min_dists, candidate_dists in zip(min_dists_list, candidate_dists_list)]
             # "Coverage" is defined as the average point-to-anchor distance.
-            coverage_val = np.mean(new_min_dists)
+
+            coverage_val = np.mean(np.mean(np.array(new_min_dists_list), axis=1)**2)
             
             # Compute diversity for the set of anchors if we added this candidate.
-            anchors_idx_np = []
-            for uid in anchors_idx:
-                # Find the position where the dataset id matches the desired id.
-                idx_temp = np.where(all_ids == uid)[0]
-                if idx_temp.size == 0:
-                    raise ValueError(f"ID {uid} not found in the obtained indices.")
-                anchors_idx_np.append(idx_temp[0])
-            anchors_idx_np = np.array(anchors_idx_np)
-            current_anchor_vectors = embeddings[anchors_idx_np]  # current anchors (m, d)
-            candidate_anchor_array = np.vstack([current_anchor_vectors, candidate_vec])
-            diversity_val = compute_diversity(candidate_anchor_array, exponent=exponent)
+
+            """
+            make all this into a loop to get a list of the indecies in the diffrent embedding spaces
+            ideally the indecies should be the same if the embeddings are sorted with releation to thier index, but in case they are not
+            """
+            diversity_val = []
+            # loop should start here
+            for embeddings, candidate_vecs in zip(embeddings_list, candidate_vec_list):
+                anchors_idx_np = []
+                for uid in anchors_idx:
+                    # Find the position where the dataset id matches the desired id.
+                    idx_temp = np.where(all_ids == uid)[0]
+                    if idx_temp.size == 0:
+                        raise ValueError(f"ID {uid} not found in the obtained indices.")
+                    anchors_idx_np.append(idx_temp[0])
+                
+                anchors_idx_np = np.array(anchors_idx_np)
+                current_anchor_vectors = embeddings[anchors_idx_np]  # current anchors (m, d)
+                candidate_anchor_array = np.vstack([current_anchor_vectors, candidate_vecs])
+                diversity_val.append(compute_diversity(candidate_anchor_array, exponent=exponent))
+            diversity_val = np.mean(np.array(diversity_val))
+            # loop should end here
             
             # Overall objective: here we subtract diversity and add coverage.
             # (Adjust signs if your formulation is different.)
             current_score = diversity_weight * diversity_val - Coverage_weight * coverage_val
-            
+
             if current_score > best_score:
                 best_score = current_score
                 best_index = idx
-                best_new_min_dists = new_min_dists
+                best_new_min_dists = new_min_dists_list
         
         # Update the selected anchors and the min_dists.
-        min_dists = best_new_min_dists
+        min_dists_list = best_new_min_dists
         anchors_idx.append(best_index)
-        if len(anchors_idx) >= num_anchors and (num_anchors*repetitions - 2) != _:
+        if len(anchors_idx) >= num_anchors and (num_anchors*repetitions - 1) != _:
             del anchors_idx[0]
-            dists = np.array([np.linalg.norm(embeddings - embeddings[anchor], axis=1) for anchor in anchors_idx]).T
-            min_dists = np.min(dists, axis=1)
+
+            """
+            dists and min dists should be for each embedding space
+            """
+            dists_list = [np.array([np.linalg.norm(embeddings - embeddings[indices==anchor], axis=1) for anchor, index in zip(anchors_idx, indices)]).T for embeddings, indices in zip(embeddings_list, indices_list)]
+            min_dists_list = [np.min(dists, axis=1) for dists in dists_list]
 
     return anchors_idx

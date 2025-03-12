@@ -8,16 +8,16 @@ from utils import set_random_seeds
 import torch
 import random
 import numpy as np
-from models import train_AE, load_saved_embeddings
+from models import *
+import torch.nn as nn
 from data import load_mnist_data
-from visualization import plot_data_list, plot_3D_relreps
-from anchors import select_anchors_by_id, greedy_one_at_a_time_single_euclidean
-from relreps import compute_relative_coordinates, compute_relative_coordinates_euclidean, compare_latent_spaces
+from anchors import *
+from relreps import *
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 
 # For reproducibility and consistency across runs, we set a seed
-seed=42
+seed=1
 set_random_seeds(seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -29,24 +29,27 @@ train_loader, test_loader = load_mnist_data()
 ### PARAMETERS ###
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = False        # Save embeddings from current run
-latent_dim = 2         # If load_saved: Must match an existing dim
+latent_dim = 2         
 anchor_num = 2
-repetitions = 1
-nr_runs = 3             # If load_saved: Must be <= number of saved runs for the dim
-plot_results = True
-compute_mrr = True      # Only set true if you have >32GB of RAM
+repetitions = 5
+nr_runs = 3
+num_epochs = 10
+anchor_algo = "greedy" # can be "random", "greedy", "p"
 
 # Hyperparameters for anchor selection
-coverage_w = 10
+coverage_w = 35
 diversity_w = 1
 exponent = 1
 
 abs = []
 labels_list = []
-anchor_random_ids = []
-for i in range(nr_runs):
-    AE_list, embeddings_list, indices_list, labels = train_AE(
-        num_epochs=2,
+anchor_ids = []
+indices_list =[]
+for i in tqdm(range(nr_runs), desc="creating embeddings"):
+    set_random_seeds(seed+i)
+    AE_list, embeddings_list, indices, labels, train_loss, test_loss, acc_list = train_AE(
+        model=Autoencoder,
+        num_epochs=num_epochs,
         batch_size=256,
         lr=1e-3,
         device=device,      
@@ -56,25 +59,45 @@ for i in range(nr_runs):
         save=save_run,
         verbose=False,
         train_loader=train_loader,
-        test_loader=test_loader,
-        seed=seed+i
+        test_loader=test_loader
     )
+    indices_list.append(indices[0])
     labels_list.append(labels[0])
     abs.append(embeddings_list[0])
-    anchor_random_ids.append(random.sample(range(len(test_loader.dataset)), 2))
+
+    # finding anchors depending on the chosen method
+    if anchor_algo == "random":
+        anchor_ids.append(random.sample(range(len(test_loader.dataset)), 2))
+
+if anchor_algo == "greedy":
+    for i in tqdm(range(nr_runs), desc="choosing anchors"):
+        set_random_seeds(seed=seed+i)
+        anchor_ids.append(greedy_one_at_a_time_single_euclidean(abs, indices_list,
+                                                                num_anchors=anchor_num, repetitions=repetitions,
+                                                                diversity_weight=diversity_w, Coverage_weight=coverage_w, verbose=False))
+elif anchor_algo == "p":
+    raise NotImplementedError()
+
+else:
+    raise NameError("anchor_algo has unrecognized name")
+    
 embeddings_list = [np.array(random.sample(embeddings.tolist(), 1000)) for embeddings in embeddings_list]
-anchors_random = []
+anchors = []
 
  
 for embedding in tqdm(abs, desc="getting anchors"):
     row = []
-    for ids in anchor_random_ids:
-        temp_anchor_random = select_anchors_by_id(AE_list, [embedding], indices_list, ids, test_loader.dataset, show=False, device=device)[0]
-        row.append(temp_anchor_random)
-    anchors_random.append(row)
+    for ids in anchor_ids:
+        temp_anchor = select_anchors_by_id(AE_list, [embedding], indices_list, ids, test_loader.dataset, show=False, device=device)[0]
+        row.append(temp_anchor)
+    anchors.append(row)
 
+# print(anchor_ids)
+
+# print(anchors)
+# quit()
 rel_reps = []
-for embeddings, anchors_row in tqdm(zip(abs, anchors_random), desc="computing rel reps"):
+for embeddings, anchors_row in tqdm(zip(abs, anchors), desc="computing rel reps"):
     temp_rel_reps_row = compute_relative_coordinates_euclidean([embeddings]*len(anchors_row), anchors_row)
     rel_reps.append(temp_rel_reps_row)
 
@@ -90,9 +113,19 @@ num_cols = 1 + len(rel_reps[0])
 fig, axes = plt.subplots(
     nrows=num_rows,
     ncols=num_cols,
-    figsize=(4 * num_cols, 4 * num_rows),
+    figsize=(3 * num_cols, 3 * num_rows),
     squeeze=False
 )
+
+if anchor_algo == "random":
+    title = "Anchors chosen by at random and their relative representation on different seeds"
+if anchor_algo == "greedy":
+    title = "Anchors chosen by greedy algorithm and their relative representation on different seeds"
+if anchor_algo == "p":
+    raise NotImplementedError()
+
+fig.suptitle(title, fontsize=18)
+
 markers = ["v", "^", "<", ">"]
 for i in tqdm(range(num_rows), desc="plotting"):
     # Plot ABS in column 0
@@ -105,7 +138,7 @@ for i in tqdm(range(num_rows), desc="plotting"):
         alpha=0.7,
         s=10
     )
-    for marker_idx, anchor in enumerate(anchors_random[i]):
+    for marker_idx, anchor in enumerate(anchors[i]):
         ax_abs.scatter(
             anchor[:, 0],
             anchor[:, 1],
@@ -116,7 +149,8 @@ for i in tqdm(range(num_rows), desc="plotting"):
             label=f"Anchor Set {marker_idx+1}"
         )
     ax_abs.legend()
-    ax_abs.set_title(f"ABS[{i}]", fontsize=10)
+    ax_abs.set_ylabel(f"Seed={seed+i}", fontsize=15)
+
 
     # Plot each of the rel_reps in columns 1..N
     for j in range(len(rel_reps[i])):
@@ -129,6 +163,7 @@ for i in tqdm(range(num_rows), desc="plotting"):
             alpha=0.7,
             s=10
         )
-        ax_rel.set_title(f"REL REP[{i}][{j}]", fontsize=10)
+        if i == 0:
+            ax_rel.set_title(f"From anchor set {j+1}", fontsize=15)
 plt.tight_layout()
 plt.show()

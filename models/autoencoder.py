@@ -38,7 +38,10 @@ class Autoencoder(nn.Module):
             nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
             nn.Sigmoid(),
             nn.BatchNorm1d(hidden_size),
-            nn.Linear(hidden_size, latent_dim), # the size 2 bottleneck layer
+            nn.Linear(hidden_size, hidden_size//2),
+            nn.Sigmoid(),
+            nn.BatchNorm1d(hidden_size//2),
+            nn.Linear(hidden_size//2, latent_dim),
             nn.BatchNorm1d(latent_dim)
         ]
         self.encoder = nn.Sequential(*encoder_layers) # '*' is unpacking the list into it's elements
@@ -170,7 +173,7 @@ class Autoencoder(nn.Module):
         train_loss_list = []
         test_loss_list = []
         # Fitting the model
-        for epoch in tqdm(range(num_epochs), desc="Training Epochs"):
+        for epoch in tqdm(range(num_epochs), desc="Training Epochs", disable=not verbose):
             # Train loss
             train_loss = self.train_one_epoch(train_loader, optimizer, criterion=loss_function,device=device)
             train_loss_list.append(train_loss)
