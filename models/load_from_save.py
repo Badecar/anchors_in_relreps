@@ -4,9 +4,6 @@ import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
 
-
-
-
 def get_save_dir(model, latent_dim):
     if model == AEClassifier:
             m = 'AEClassifier'

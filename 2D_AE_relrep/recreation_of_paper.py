@@ -119,7 +119,6 @@ anch_list = P_anchors_list
 
 # Compute relative coordinates for the embeddings
 relrep_list = compute_relative_coordinates_euclidean(emb_list, anch_list)
-anch_rel = compute_relative_coordinates_euclidean(rand_anchors_list, anch_list) # Computing relrep for anchors
 print(f"length of relrep_list: {len(relrep_list)}")
 
 ## TODO: CURRENTLY COMPUTING RELREPS WITH THE WRONG FUNCTION (same functionality)
