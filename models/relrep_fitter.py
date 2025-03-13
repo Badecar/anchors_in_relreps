@@ -4,6 +4,7 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
+from .VAE import VAEDecoderWrapper, VariationalAutoencoder
 
 
 def compute_relreps(latent, anchors, mode='cosine'):
@@ -23,8 +24,17 @@ class RelRepTrainer:
         self.head_type = head_type
 
         self.base_model = base_model.to(device)
-        for param in self.base_model.encoder.parameters():
-            param.requires_grad = False
+
+        # Freeze the encoder:
+        # If the model has an 'encoder' attribute, use it; otherwise freeze layers used in encoding.
+        if hasattr(self.base_model, "encoder"):
+            for param in self.base_model.encoder.parameters():
+                param.requires_grad = False
+        else:
+            # Assuming a VAE structure with encode method using fc1, fc_mu, fc_logvar.
+            for name, param in self.base_model.named_parameters():
+                if any(layer in name for layer in ["fc1", "fc_mu", "fc_logvar"]):
+                    param.requires_grad = False
 
         self.head = head.to(device)
         self.anchors = self._prepare_anchors(anchors)
@@ -64,7 +74,11 @@ class RelRepTrainer:
                 y = y[1]
             y = y.to(self.device)
             with torch.no_grad():
-                latent = self.base_model.encoder(x)
+                if isinstance(self.base_model, VariationalAutoencoder):
+                    # Use the full forward pass to sample stochastically
+                    _, latent, _ = self.base_model(x)
+                else:
+                    latent = self.base_model.encoder(x)
             rel = self.compute_relreps(latent)
             output = self.head(rel)
 
@@ -102,7 +116,11 @@ class RelRepTrainer:
                 if isinstance(y, (tuple, list)):
                     y = y[1]
                 y = y.to(self.device)
-                latent = self.base_model.encoder(x)
+                if isinstance(self.base_model, VariationalAutoencoder):
+                    # Use the full forward pass to sample stochastically
+                    _, latent, _ = self.base_model(x)
+                else:
+                    latent = self.base_model.encoder(x)
                 rel = self.compute_relreps(latent)
                 output = self.head(rel)
                 if self.head_type == 'reconstructor':
@@ -151,7 +169,7 @@ class RelRepTrainer:
         else:
             return train_losses, test_losses, None
     
-def validate_relhead(decoder, latent, ground_truth, device='cuda', show=False):
+def validate_relhead(decoder, relrep, ground_truth, device='cuda', show=False):
     """
     Validates a relative decoder using precomputed latent representations.
     It decodes the latent embeddings (relative coordinates) with the given decoder and calculates
@@ -171,8 +189,8 @@ def validate_relhead(decoder, latent, ground_truth, device='cuda', show=False):
 
     decoder.eval()
     with torch.no_grad():
-        latent = latent.to(device)
-        output = decoder(latent)
+        relrep = relrep.to(device)
+        output = decoder(relrep)
         # Flatten ground_truth if needed (e.g. images may be [N, C, H, W])
         if ground_truth.dim() > 2:
             ground_truth = ground_truth.view(ground_truth.size(0), -1)
@@ -204,21 +222,20 @@ def validate_relhead(decoder, latent, ground_truth, device='cuda', show=False):
 
     return mse_mean, mse_std
 
-
+## THIS USING THE MEAN OF THE VAE AND THE DECODER IS CLOSER TO AN AE DECODER ##
 def train_rel_head(anchor_num, anchors, num_epochs, AE, train_loader, test_loader, device, acc, train_loss_AE, test_loss_AE, head_type='reconstructor', distance_measure='cosine', lr=1e-3, verbose=True, show_AE_loss=False):
-
     if head_type == 'reconstructor':
-        # For MNIST, the reconstructed image is 28*28=784 dimensional.
-        # Change this to fit the head of the model we are using
-        head = nn.Sequential(
-            nn.Linear(anchor_num, 128),
-            nn.ReLU(),
-            nn.BatchNorm1d(128),
-            nn.Linear(128, 28 * 28),
-            nn.Sigmoid()
-        )
+        if isinstance(AE, VariationalAutoencoder):
+            head = VAEDecoderWrapper(AE)
+        else:
+            head = nn.Sequential(
+                nn.Linear(anchor_num, 128),
+                nn.ReLU(),
+                nn.BatchNorm1d(128),
+                nn.Linear(128, 28 * 28),
+                nn.Sigmoid()
+            )
     else:
-        # Or this
         head = nn.Sequential(
             nn.Linear(anchor_num, 128),
             nn.ReLU(),
@@ -226,8 +243,7 @@ def train_rel_head(anchor_num, anchors, num_epochs, AE, train_loader, test_loade
             nn.Linear(128, 10)
         )
 
-    # Instantiate the trainer
-    # Set head_type to 'reconstructor' (or 'classifier' if you're using a classifier head)
+    # Instantiate the trainer with the chosen head.
     trainer = RelRepTrainer(
         base_model=AE,
         head=head,
@@ -237,7 +253,7 @@ def train_rel_head(anchor_num, anchors, num_epochs, AE, train_loader, test_loade
         device=device
     )
 
-    # Train the head using the fit method
+    # Train the head using trainer.fit, etc.
     fit_results = trainer.fit(
         train_loader,
         test_loader,
@@ -248,7 +264,6 @@ def train_rel_head(anchor_num, anchors, num_epochs, AE, train_loader, test_loade
     train_loss_relrepfit, test_loss_relrepfit, test_accuracies = fit_results
 
     if show_AE_loss:
-        # Print the full list of losses per epoch
         print("\nFull Autoencoder Training Losses per Epoch:")
         print("Train Losses:", train_loss_AE)
         print("Test Losses:", test_loss_AE)
@@ -261,17 +276,17 @@ def train_rel_head(anchor_num, anchors, num_epochs, AE, train_loader, test_loade
     if trainer.head_type == 'classifier':
         print("Test Accuracy:", test_accuracies[-1])
     
-    # Show 4 random examples of original images and their reconstruction (only for reconstructor head)
     if trainer.head_type == 'reconstructor':
         print("\nShowing 4 random examples of original images and their reconstruction:")
-        # Get a batch from the test loader
         batch = next(iter(test_loader))
         images, _ = batch
         images = images.to(device)
         with torch.no_grad():
-            latent = AE.encoder(images)
+            if isinstance(AE, VariationalAutoencoder):
+                _, latent, _ = AE(images)
+            else:
+                latent = AE.encoder(images)
             rel = trainer.compute_relreps(latent)
-        # Use the provided validation function to display samples.
         validate_relhead(trainer.head, rel, images, device=device, show=True)
     
     return trainer.head

@@ -9,7 +9,7 @@ class IndexedMNIST(datasets.MNIST):
         image, label = super().__getitem__(index)
         # Return image and a tuple (unique index, label)
         return image, (index, label)
-        
+
 def load_mnist_data(batch_size=256, download=True, validation_split=0.1):
     """
     Loads and returns MNIST train, validation, and test DataLoaders with flattened images.

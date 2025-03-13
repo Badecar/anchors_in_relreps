@@ -1,6 +1,7 @@
 from .autoencoder import Autoencoder, AEClassifier
 from .training import *
 from .relrep_fitter import *
+from .VAE import VariationalAutoencoder
 
 __all__ = [
     'Autoencoder',
@@ -10,5 +11,6 @@ __all__ = [
     'RelRepTrainer',
     'train_rel_head',
     'load_AE_models',
-    'validate_relhead'
+    'validate_relhead',
+    'VariationalAutoencoder'
     ]

@@ -3,11 +3,24 @@ import numpy as np
 from utils import set_random_seeds
 from data import sort_results
 import torch
-from models import Autoencoder, AEClassifier
+from .autoencoder import Autoencoder, AEClassifier
+from .VAE import VariationalAutoencoder
 
+def get_save_dir(model, latent_dim):
+    if model == AEClassifier:
+            m = 'AEClassifier'
+    elif model == Autoencoder:
+            m = 'AE'
+    elif model == VariationalAutoencoder:
+            m = 'VAE'
+    save_dir_emb = os.path.join("models", "saved_embeddings", m, f"dim{latent_dim}")
+    save_dir_AE = os.path.join("models", "saved_models", m, f"dim{latent_dim}")
+    os.makedirs(save_dir_AE, exist_ok=True)
+    os.makedirs(save_dir_emb, exist_ok=True)
+    return save_dir_emb, save_dir_AE
 
 # Train AE
-def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
+def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, input_dim=int, beta=1.0, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -40,21 +53,18 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
     # Create the directory to save embeddings if needed.
     
     if save:
-        if model == AEClassifier:
-                m = 'AEClassifier'
-        else:
-                m = 'AE'
-        save_dir_emb = os.path.join("models", "saved_embeddings", m, f"dim{latent_dim}")
-        save_dir_AE = os.path.join("models", "saved_models", m, f"dim{latent_dim}")
-        os.makedirs(save_dir_AE, exist_ok=True)
-        os.makedirs(save_dir_emb, exist_ok=True)
+        save_dir_emb, save_dir_AE = get_save_dir(model, latent_dim)
 
     for i in range(trials):
         if verbose:
             print(f"Trial {i+1} of {trials}")
         # Create the data loaders
         # Initialize and train the autoencoder
-        AE = model(latent_dim=latent_dim, hidden_size=hidden_layer)
+        if model == VariationalAutoencoder:
+            # AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_dims=[hidden_layer, hidden_layer//2], beta=1)
+            AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_size=hidden_layer)
+        else:
+            AE = model(latent_dim=latent_dim, hidden_size=hidden_layer, input_dim=input_dim)
         AE.to(device)
         train_loss, test_loss = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=verbose)
         train_loss_list.append(train_loss)
@@ -103,12 +113,8 @@ def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
             - labels_list (list of np.ndarray): Loaded labels from each trial.
     """
     print("Loading saved embeddings and models")
-    if model == Autoencoder:
-        m = 'AE'
-    else:
-        m = 'AEClassifier'
     if save_dir is None:
-        save_dir = os.path.join("models", "saved_embeddings", m, f"dim{latent_dim}")
+        save_dir, _ = get_save_dir(model, latent_dim)
     
     embeddings_list = []
     indices_list = []
@@ -134,7 +140,7 @@ def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
         
     return embeddings_list, indices_list, labels_list
 
-def load_AE_models(model, trials=1, latent_dim=2, hidden_layer=128, save_dir_AE=None, device='cuda'):
+def load_AE_models(model, trials=1, latent_dim=2, input_dim=28*28, hidden_layer=128, save_dir_AE=None, device='cuda'):
     """
     Loads a specified number of saved AE (or AEClassifier) models into a list.
     
@@ -150,17 +156,21 @@ def load_AE_models(model, trials=1, latent_dim=2, hidden_layer=128, save_dir_AE=
     Returns:
         list: A list of loaded models. Models not found will be skipped.
     """
-    if model == Autoencoder:
-        m = 'AE'
-    else:
-        m = 'AEClassifier'
     if save_dir_AE is None:
-        save_dir_AE = os.path.join("models", "saved_models", m, f"dim{latent_dim}")
+        _, save_dir_AE = get_save_dir(model, latent_dim)
     AE_list = []
     for i in range(1, trials + 1):
         model_path = os.path.join(save_dir_AE, f'ae_trial_{i}_dim{latent_dim}.pth')
         if os.path.exists(model_path):
-            loaded_model = model(latent_dim=latent_dim, hidden_size=hidden_layer)
+            # For VAE, initialize with input_dim, hidden_dims and beta; otherwise, use hidden_size.
+            if model.__name__ == "VariationalAutoencoder":
+                # Ensure input_dim is provided; you might consider adding input_dim as a parameter to load_AE_models.
+                # loaded_model = model(input_dim=input_dim, latent_dim=latent_dim,
+                                    #  hidden_dims=[hidden_layer, hidden_layer // 2], beta=1)
+                loaded_model = model(input_dim=input_dim, latent_dim=latent_dim,
+                                     hidden_size=hidden_layer)                    
+            else:
+                loaded_model = model(latent_dim=latent_dim, hidden_size=hidden_layer, input_dim=input_dim)
             loaded_model.load_state_dict(torch.load(model_path, map_location=device))
             loaded_model.to(device)
             AE_list.append(loaded_model)
