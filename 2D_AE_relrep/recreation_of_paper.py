@@ -14,6 +14,7 @@ from data import *
 from visualization import *
 from anchors import *
 from relreps import *
+from zero_shot import *
 from tqdm import tqdm
 
 # For reproducibility and consistency across runs, we set a seed

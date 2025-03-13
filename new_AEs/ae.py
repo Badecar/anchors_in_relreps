@@ -130,3 +130,32 @@ class VanillaAE(nn.Module):
         """
 
         return self.forward(x)[0]
+
+    # Forward method for compatibility.
+    def forward(self, x: Tensor) -> Dict[Output, Tensor]:
+        encoded = self.encode(x)
+        latent = encoded[Output.BATCH_LATENT]
+        return self.decode(latent)
+
+    # Add get_latent_embeddings so that it works like in our old AE
+    def get_latent_embeddings(self, data_loader, device='cpu'):
+        self.eval()
+        embeddings = []
+        indices = []
+        labels = []
+        with torch.no_grad():
+            for i, batch in enumerate(data_loader):
+                # If our dataloader returns a tuple (image, (idx, label)) as in our old code:
+                if isinstance(batch[1], (tuple, list)) and len(batch[1]) == 2:
+                    x, (idx, lab) = batch
+                    indices.append(idx)
+                    labels.append(lab)
+                else:
+                    # Otherwise, assume just (image, label)
+                    x, lab = batch
+                    indices.append(torch.arange(x.size(0)))
+                    labels.append(lab)
+                x = x.to(device)
+                latent = self.encode(x)[Output.BATCH_LATENT]
+                embeddings.append(latent)
+        return torch.cat(embeddings, dim=0), torch.cat(indices, dim=0), torch.cat(labels, dim=0)

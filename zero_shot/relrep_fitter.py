@@ -4,7 +4,7 @@ from tqdm import tqdm
 import torch.nn as nn
 import torch.nn.functional as F
 import matplotlib.pyplot as plt
-from .VAE import VAEDecoderWrapper, VariationalAutoencoder
+from models import VAEDecoderWrapper, VariationalAutoencoder
 
 
 def compute_relreps(latent, anchors, mode='cosine'):
