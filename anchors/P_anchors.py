@@ -34,7 +34,7 @@ def coverage_loss(anchors, embeddings):
     # embeddings: [N, D] and anchors: [N_anchors, D]
     # For each embedding, compute its distance to each anchor and take the minimum.
     # Then, average over all embeddings.
-    # (Here we use squared Euclidean distance as an example.)
+    # (Here we use squared Euclidean distance)
     dists = torch.cdist(embeddings, anchors, p=2)  # [N, N_anchors]
     min_dists, _ = torch.min(dists, dim=1)
     return torch.mean(min_dists)

@@ -14,7 +14,7 @@ class Autoencoder(nn.Module):
     ### NOTES ###
     # Might have to use batchnorm to impose a structure on the latent space
 
-    def __init__(self, latent_dim=2, hidden_size=128):
+    def __init__(self,input_dim, latent_dim=2, hidden_size=128):
         # super().__init__()
         # # Encoder layers
         # # 784 -> 128 -> 2
@@ -47,7 +47,7 @@ class Autoencoder(nn.Module):
         # Encoder layers
         # 784 -> 128 -> 2
         encoder_layers = [
-            nn.Linear(28 * 28, hidden_size), # asuming size 28x28 of the images
+            nn.Linear(input_dim, hidden_size), # asuming size 28x28 of the images
             nn.ReLU(),
             nn.BatchNorm1d(hidden_size),
             nn.Linear(hidden_size, latent_dim),
