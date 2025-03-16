@@ -211,8 +211,9 @@ def greedy_one_at_a_time_single_euclidean(embeddings_list, indices_list, num_anc
             anchors_idx.append(init_idx)
 
             # Compute initial Euclidean distances from all embeddings to the first anchor.
-            chosen_anchors = [[embeddings[init_idx]] for embeddings, idx in zip(embeddings_list, init_idx_multiple)]  # shape (d,)
+            chosen_anchors = [embeddings[idx] for embeddings, idx in zip(embeddings_list, init_idx_multiple)]  # shape (d,)
             min_dists_list = [np.linalg.norm(embeddings - chosen_anchor, axis=1) for embeddings, chosen_anchor in zip(embeddings_list, chosen_anchors)]  # shape (n,)
+            
             all_ids = np.array(indices)
             continue
 
@@ -291,7 +292,7 @@ def greedy_one_at_a_time_single_euclidean(embeddings_list, indices_list, num_anc
             """
             dists and min dists should be for each embedding space
             """
-            dists_list = [np.array([np.linalg.norm(embeddings - embeddings[indices==anchor], axis=1) for anchor, index in zip(anchors_idx, indices)]).T for embeddings, indices in zip(embeddings_list, indices_list)]
+            dists_list = [np.array([np.linalg.norm(embeddings - embeddings[indices==index], axis=1) for anchor, index in zip(anchors_idx, indices)]).T for embeddings, indices in zip(embeddings_list, indices_list)]
             min_dists_list = [np.min(dists, axis=1) for dists in dists_list]
 
     return anchors_idx

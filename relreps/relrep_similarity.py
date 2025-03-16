@@ -3,7 +3,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, compute_mrr=False, AE1=None, AE2=None):
+def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, compute_mrr=False):
     """
     Computes the Mean Reciprocal Rank (MRR), average cosine similarity, and average Jaccard similarity 
     between two sets of embeddings.
@@ -38,10 +38,6 @@ def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, comp
     embeddings1_sorted = embeddings1[order1]
     embeddings2_sorted = embeddings2[order2]
 
-    # Decoding the first 5 embeddings to check indexing
-    # for i in range(5):
-    #     visualize_reconstruction_from_embedding(embeddings1_sorted[i], AE1)
-    #     visualize_reconstruction_from_embedding(embeddings2_sorted[i], AE2)
 
     # Calculate the cosine similarity elementwise between corresponding embeddings.
     cos_sim = F.cosine_similarity(embeddings1_sorted, embeddings2_sorted, dim=1)
@@ -80,7 +76,7 @@ def compute_latent_similarity(embeddings1, indices1, embeddings2, indices2, comp
     
     return mrr, mean_cos_sim
 
-def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE_list=None,  verbose=True):
+def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, verbose=True):
     """
     Compares latent spaces by computing the Mean Reciprocal Rank (MRR) and cosine similarity 
     between pairs of embeddings.
@@ -106,9 +102,7 @@ def compare_latent_spaces(embeddings_list, indices_list, compute_mrr = False, AE
                 indices_list[i],
                 embeddings_list[j],
                 indices_list[j],
-                compute_mrr,
-                AE1=AE_list[i],
-                AE2=AE_list[j])
+                compute_mrr)
             mrr_matrix[i, j] = mrr
             cos_sim_matrix[i, j] = cos_sim
     

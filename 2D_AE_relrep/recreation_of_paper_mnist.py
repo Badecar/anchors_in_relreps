@@ -256,4 +256,4 @@ if plot_results:
 #   The eucl relreps are only in the first quadrant, so cosine sim will be higher
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, AE_list=model_list, verbose=False)
+    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
