@@ -35,14 +35,14 @@ use_small_dataset = False
 model = Autoencoder #AEClassifier or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
-load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = True        # Save embeddings from current run
-latent_dim = 10         # If load_saved: Must match an existing dim
-anchor_num = 10
+load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
+save_run = False        # Save embeddings from current run
+latent_dim = 20         # If load_saved: Must match an existing dim
+anchor_num = 20
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
-num_epochs = 7
+num_epochs = 30
 lr = 1e-3
 
 # Hyperparameters for anchor selection
@@ -207,4 +207,4 @@ if plot_results:
 
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, AE_list=AE_list, verbose=False)
+    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, verbose=False)
