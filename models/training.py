@@ -5,6 +5,7 @@ from data import sort_results
 import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
+from .AE_conv import AE_conv_MNIST
 from .load_from_save import get_save_dir
 
 # Train AE
@@ -48,11 +49,8 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
             print(f"Trial {i+1} of {trials}")
         # Create the data loaders
         # Initialize and train the autoencoder
-        if model == VariationalAutoencoder:
-            # AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_dims=[hidden_layer, hidden_layer//2], beta=1)
-            AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_size=hidden_layer)
-        else:
-            AE = model(latent_dim=latent_dim, hidden_size=hidden_layer, input_dim=input_dim)
+        AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_size=hidden_layer)
+
         AE.to(device)
         train_loss, test_loss = AE.fit(train_loader, test_loader, num_epochs, lr, device=device, verbose=verbose)
         train_loss_list.append(train_loss)

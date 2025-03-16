@@ -28,16 +28,13 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 train_loader, test_loader, val_loader = load_mnist_data()
 loader = val_loader
 use_small_dataset = False
-### MAKE SURE THAT WE ARE USING THE SAME DATA FOR ALL FUNCTIONS ###
-
-# TODO: CURRENTLY USING OLD VERSION OF THE AE FOR TESTING. NEED TO UPDATE TO NEW VERSION
 
 ### PARAMETERS ###
-model = VariationalAutoencoder #VariationalAutoencoder, AEClassifier, or Autoencoder
+model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
-load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = True        # Save embeddings from current run
+load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
+save_run = False        # Save embeddings from current run
 dim = 10         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
@@ -73,7 +70,7 @@ else:
         lr=lr,
         device=device,      
         latent_dim=dim,
-        hidden_layer=128,
+        hidden_layer=None, # Select none for conv models
         trials=nr_runs,
         save=save_run,
         verbose=True,
@@ -104,7 +101,7 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # Optimize anchors and compute P_anchors_list
-anchor_selector, P_anchors_list = get_optimized_anchors(
+_, P_anchors_list = get_optimized_anchors(
     emb = small_dataset_emb,
     anchor_num=anchor_num,
     epochs=50,
