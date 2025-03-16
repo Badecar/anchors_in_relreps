@@ -18,7 +18,7 @@ from zero_shot import *
 from tqdm import tqdm
 
 # For reproducibility and consistency across runs, we set a seed
-seed = 42
+seed = 43
 set_random_seeds(seed)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -34,8 +34,8 @@ model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
 load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = False        # Save embeddings from current run
-dim = 10         # If load_saved: Must match an existing dim
+save_run = True        # Save embeddings from current run
+dim = 100         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 
@@ -112,10 +112,10 @@ _, P_anchors_list = get_optimized_anchors(
     verbose=False,
     device=device
 )
-anch_list = P_anchors_list
+anch_list = rand_anchors_list
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_euclidean(emb_list, anch_list)
+relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
 print(f"length of relrep_list: {len(relrep_list)}")
 
 ## TODO: CURRENTLY COMPUTING RELREPS WITH THE WRONG FUNCTION (same functionality)

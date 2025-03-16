@@ -3,6 +3,7 @@ import numpy as np
 import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
+from .AE_conv import AE_conv_MNIST
 
 def get_save_dir(model, latent_dim):
     if model == AEClassifier:
@@ -11,6 +12,8 @@ def get_save_dir(model, latent_dim):
             m = 'AE'
     elif model == VariationalAutoencoder:
             m = 'VAE'
+    elif model == AE_conv_MNIST:
+            m = 'AE_conv_MNIST'
     save_dir_emb = os.path.join("experiments", "saved_embeddings", m, f"dim{latent_dim}")
     save_dir_AE = os.path.join("experiments", "saved_models", m, f"dim{latent_dim}")
     os.makedirs(save_dir_AE, exist_ok=True)
