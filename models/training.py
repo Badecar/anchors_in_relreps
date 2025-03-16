@@ -5,7 +5,7 @@ from data import sort_results
 import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
-from .AE_conv import AE_conv_MNIST
+from .AE_conv_MNIST import AE_conv_MNIST
 from .load_from_save import get_save_dir
 
 # Train AE

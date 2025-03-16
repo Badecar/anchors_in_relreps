@@ -33,23 +33,24 @@ use_small_dataset = False
 model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
-load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
+load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 100         # If load_saved: Must match an existing dim
+dim = 30         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
 num_epochs = 10
 lr = 1e-3
+hidden_layer = 128 if model != AE_conv_MNIST else None
 
 # Hyperparameters for anchor selection
-coverage_w = 0.92
-diversity_w = 0.08
+coverage_w = 0.92 # Coverage of embeddings
+diversity_w = 1 - coverage_w # Pairwise between anchors
 exponent = 1
 
 # Post-processing
-zero_shot = False
+zero_shot = True
 plot_results = True
 compute_mrr = False      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
@@ -58,7 +59,7 @@ compute_relrep_loss = False # Can only compute if not loading from save
 
 if load_saved:
     emb_list_train, idx_list_train, labels_list_train = load_saved_emb(model, trials=nr_runs, latent_dim=dim)
-    model_list = load_AE_models(model=model, trials=nr_runs, latent_dim=dim, hidden_layer=128, device=device)
+    model_list = load_AE_models(model=model, trials=nr_runs, latent_dim=dim, hidden_layer=hidden_layer, device=device)
     # Initializing empty lists as to not break the code below
     acc_list, train_loss_list_AE,test_loss_list_AE = np.zeros(nr_runs), np.zeros(nr_runs), np.zeros(nr_runs)
 else:
@@ -70,7 +71,7 @@ else:
         lr=lr,
         device=device,      
         latent_dim=dim,
-        hidden_layer=None, # Select none for conv models
+        hidden_layer=hidden_layer,
         trials=nr_runs,
         save=save_run,
         verbose=True,
@@ -89,7 +90,7 @@ small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_data
     emb_list,
     idx_list,
     labels_list,
-    samples_per_class=200
+    samples_per_class=400
 )
 
 if use_small_dataset:
@@ -104,7 +105,7 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 _, P_anchors_list = get_optimized_anchors(
     emb = small_dataset_emb,
     anchor_num=anchor_num,
-    epochs=50,
+    epochs=200,
     lr=1e-1,
     coverage_weight=coverage_w,
     diversity_weight=diversity_w,
@@ -115,8 +116,7 @@ _, P_anchors_list = get_optimized_anchors(
 anch_list = rand_anchors_list
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
-print(f"length of relrep_list: {len(relrep_list)}")
+relrep_list = compute_relative_coordinates_euclidean(emb_list, anch_list)
 
 ## TODO: CURRENTLY COMPUTING RELREPS WITH THE WRONG FUNCTION (same functionality)
 ## TODO: PROBABLY EASIER TO PASS THE RELREPS IN INSTEAD OF THE LOADERS
@@ -130,75 +130,130 @@ if zero_shot:
     mse_reg, mse_std_reg = model_list[0].validate(loader, device=device)
     print("Regular AE Validation MSE: {:.5f} ± {:.5f}".format(mse_reg, mse_std_reg))
 
-    # 2. Train the relative decoder using the first AE (freeze its encoder)
-    rel_decoder = train_rel_head(
-        anchor_num=anchor_num,
-        anchors=anch_list[0],
-        num_epochs=num_epochs,
-        AE=model_list[0],
-        train_loader=train_loader,
-        test_loader=test_loader,
-        device=device,
-        acc=acc_list,
-        train_loss_AE=train_loss_list_AE,
-        test_loss_AE=test_loss_list_AE,
-        head_type=head_type,
-        distance_measure=distance_measure,
-        lr=lr,
-        verbose=False,
-        show_AE_loss=False # CANT run from save if this is True
+    # 2. Train the relative decoder using the relative coordinates and the validation set
+    # Point 2: Train the relative decoder using the relative coordinates and the validation set targets
+
+    from torch.utils.data import TensorDataset, DataLoader
+    # New approach: use the dataset order, which is assumed to match relrep_list order.
+    # Ensure relative_reps is a tensor.
+    if not isinstance(relrep_list[0], torch.Tensor):
+        first_relrep = torch.tensor(relrep_list[0])
+    else:
+        first_relrep = relrep_list[0].cpu()
+
+    # Build target_images using the dataset’s order.
+    from torchvision import transforms
+    to_tensor = transforms.ToTensor()
+
+    target_images = []
+    for i in range(len(loader.dataset)):
+        img, _ = loader.dataset[i]
+        # In case img is not already a tensor, convert it.
+        if not isinstance(img, torch.Tensor):
+            img = to_tensor(img)
+        img_flat = img.view(-1)
+        target_images.append(img_flat)
+    target_images = torch.stack(target_images, dim=0)
+
+    # Ensure first_relrep is a tensor.
+    if not isinstance(first_relrep, torch.Tensor):
+        first_relrep_tensor = torch.tensor(first_relrep).clone().detach()
+    else:
+        first_relrep_tensor = first_relrep.cpu()  # or first_relrep.clone().detach()
+
+    # Ensure target_images is a tensor.
+    if not isinstance(target_images, torch.Tensor):
+        target_images_tensor = torch.stack(target_images, dim=0)
+    else:
+        target_images_tensor = target_images
+
+    # Create the TensorDataset using the proper tensors.
+    rel_decoder_dataset = TensorDataset(first_relrep_tensor, target_images_tensor)
+    rel_decoder_loader = DataLoader(rel_decoder_dataset, batch_size=256, shuffle=True)
+
+    # Instantiate the zero-shot relative decoder.
+    # We use the relative representation dimension from relative_reps,
+    # the expected encoder output shape and number of channels from the first AE.
+    rel_decoder = rel_AE_conv_MNIST(
+        relative_output_dim=first_relrep.size(1),
+        encoder_out_shape=model_list[0].encoder_out_shape,  # expected conv feature map shape
+        n_channels=model_list[0].image_shape[0]             # e.g., 1 for MNIST
     )
-    print("Relative decoder training complete.")
 
-    # 3. Evaluate every AE using the trained relative decoder
-    # TODO: Are they sorted properly?
-    print("Comparing cosine similarity of validation relreps")
-    compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, AE_list=model_list, verbose=False)
+    # Optionally, move the model to the device.
+    rel_decoder.to(device)
 
-    # Prepare the ground truth images from the validation set (if not already available)
-    all_val_images = []
-    for x, _ in loader:
-        all_val_images.append(x.to(device))
-    all_val_images = torch.cat(all_val_images, dim=0)
-    all_val_images_flat = all_val_images.view(all_val_images.size(0), -1)
+    # Train the relative decoder.
+    num_epochs_rel = 10  # adjust as needed
+    train_losses, val_losses = rel_decoder.fit(
+        train_loader=rel_decoder_loader,
+        test_loader=rel_decoder_loader,
+        num_epochs=num_epochs_rel,
+        lr=1e-3,
+        device=device,
+        verbose=True
+    )
 
-    # Validate the relative decoder using the computed relative coordinates for each AE
-    for relrep in range(len(relrep_list)):
-        rel_coords_tensor = torch.tensor(relrep_list[relrep], dtype=torch.float32)
-        mse_mean, mse_std = validate_relhead(
-            rel_decoder,
-            rel_coords_tensor,
-            all_val_images_flat,
-            device=device,
-            show=True)
-        print(f"Validation AE {relrep} relative decoder validation MSE: {mse_mean:.5f} ± {mse_std:.5f}")
-    ### ###
+    
+    # Choose 3 random indices from the dataset
+    sample_indices = random.sample(range(len(loader.dataset)), 3)
+    # Prepare a transform to ensure images are tensors
+    to_tensor = transforms.ToTensor()
+    # In the plotting loop after decoding:
+    for trial, _ in enumerate(model_list):
+        rel_reps = relrep_list[trial]
+        decoded_images = []
+        original_images = []
+
+        for idx in sample_indices:
+            if not isinstance(rel_reps[idx], torch.Tensor):
+                r = torch.tensor(rel_reps[idx]).unsqueeze(0).to(device)
+            else:
+                r = rel_reps[idx].unsqueeze(0).to(device)
+            decoded = rel_decoder(r)
+            decoded_img = decoded.cpu().detach().view(28, 28)
+            decoded_images.append(decoded_img)
+
+            img, _ = loader.dataset[idx]
+            if not isinstance(img, torch.Tensor):
+                img = to_tensor(img)
+            original_img = img.squeeze()
+            # If image is flattened (i.e. 784 elements), reshape it:
+            if original_img.ndim == 1 and original_img.numel() == 784:
+                original_img = original_img.view(28, 28)
+            original_images.append(original_img)
+
+        plt.figure(figsize=(9, 4))
+        for i in range(3):
+            plt.subplot(2, 3, i + 1)
+            plt.imshow(original_images[i], cmap='gray')
+            plt.title("Original")
+            plt.axis('off')
+
+            plt.subplot(2, 3, i + 4)
+            plt.imshow(decoded_images[i], cmap='gray')
+            plt.title("Decoded")
+            plt.axis('off')
+        plt.suptitle(f"AE Trial {trial+1}: Original vs Decoded Images")
+        plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+        plt.show()
+
+
 
 ### Plotting ###
 if plot_results:
     do_pca = dim > 2
-    # Plot encodings side by side
-    # is_relrep = True
-    # if is_relrep:
-    #     print("Plotting relrep")
-    #     plot_data_list(relrep_list, labels_list, do_pca=False, is_relrep=is_relrep, anchors_list=anch_rel)
-    # else:
-    #     print("Plotting absolute embeddings")
-    #     plot_data_list(emb_list, labels_list, do_pca=True, is_relrep=is_relrep, anchors_list=rand_anchors_list)
-
+    
     print("Plotting absolute embeddings")
-    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=False, anchors_list=rand_anchors_list)
+    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=False, anchors_list=anch_list)
     print("Plotting relrep")
     plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True)
 
-    # print("Plotting reference image")
-    # visualize_image_by_idx(idx_list[0][0], loader)
     # print("Plotting reconstructions")
-    # visualize_reconstruction_by_id(idx_list[0][0], model_list[0], loader, device=device)
-    # # visualize_reconstruction_from_embedding(emb_list[0][0], model_list[0], device=device)
+    # visualize_reconstruction_by_id(idx_list[0][20], model_list[0], loader, device=device)
 
-
-
+# NOTE: Watch out with comparing cosine sim between cossim- and eucl relreps.
+#   The eucl relreps are only in the first quadrant, so cosine sim will be higher
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
     compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, AE_list=model_list, verbose=False)

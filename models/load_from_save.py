@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
-from .AE_conv import AE_conv_MNIST
+from .AE_conv_MNIST import AE_conv_MNIST
 
 def get_save_dir(model, latent_dim):
     if model == AEClassifier:
