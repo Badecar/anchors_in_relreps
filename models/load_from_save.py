@@ -3,7 +3,7 @@ import numpy as np
 import torch
 from .autoencoder import Autoencoder, AEClassifier
 from .VAE import VariationalAutoencoder
-from .AE_conv import AE_conv_MNIST
+from .AE_conv_MNIST import AE_conv_MNIST
 
 def get_save_dir(model, latent_dim):
     if model == AEClassifier:
@@ -20,7 +20,7 @@ def get_save_dir(model, latent_dim):
     os.makedirs(save_dir_emb, exist_ok=True)
     return save_dir_emb, save_dir_AE
 
-def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
+def load_saved_emb(model, nr_runs=1, latent_dim=int, save_dir=None):
     """
     Loads saved embeddings, indices, and labels from the saved embeddings directory.
     
@@ -43,7 +43,7 @@ def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
     indices_list = []
     labels_list = []
     
-    for i in range(trials):
+    for i in range(nr_runs):
         emb_path = os.path.join(save_dir, f'embeddings_trial_{i+1}_dim{latent_dim}.npy')
         idx_path = os.path.join(save_dir, f'indices_trial_{i+1}_dim{latent_dim}.npy')
         lab_path = os.path.join(save_dir, f'labels_trial_{i+1}_dim{latent_dim}.npy')
@@ -63,7 +63,7 @@ def load_saved_emb(model, trials=1, latent_dim=int, save_dir=None):
         
     return embeddings_list, indices_list, labels_list
 
-def load_AE_models(model, trials=1, latent_dim=2, input_dim=28*28, hidden_layer=128, save_dir_AE=None, device='cuda'):
+def load_AE_models(model, nr_runs=1, latent_dim=2, input_dim=28*28, hidden_layer=128, save_dir_AE=None, device='cuda'):
     """
     Loads a specified number of saved AE (or AEClassifier) models into a list.
     
@@ -82,7 +82,7 @@ def load_AE_models(model, trials=1, latent_dim=2, input_dim=28*28, hidden_layer=
     if save_dir_AE is None:
         _, save_dir_AE = get_save_dir(model, latent_dim)
     AE_list = []
-    for i in range(1, trials + 1):
+    for i in range(1, nr_runs + 1):
         model_path = os.path.join(save_dir_AE, f'ae_trial_{i}_dim{latent_dim}.pth')
         if os.path.exists(model_path):
             # For VAE, initialize with input_dim, hidden_dims and beta; otherwise, use hidden_size.

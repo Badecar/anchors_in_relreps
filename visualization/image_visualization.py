@@ -6,36 +6,59 @@ import matplotlib.pyplot as plt
 def visualize_reconstruction_by_id(unique_id, autoencoder, dataset, device='cuda'):
     """
     Visualizes the original image and its reconstruction from the autoencoder
-    corresponding to a given unique dataset ID.
+    corresponding to a given unique dataset ID by searching the DataLoader for a match.
     
     Args:
-        unique_id (int): The unique index of the MNIST image to visualize.
+        unique_id (int): The unique id of the MNIST image.
         autoencoder (nn.Module): The trained autoencoder.
-        dataset (Dataset): The IndexedMNIST dataset instance.
+        dataset (DataLoader or Dataset): The dataset where each item is (image, (uid, label)).
         device (str): 'cpu' or 'cuda'.
     """
+    import matplotlib.pyplot as plt
     autoencoder.eval()
     
-    # Retrieve the image using the unique_id from the dataset.
-    # Since the dataset is IndexedMNIST, its __getitem__ returns (image, (uid, label))
-    image, (uid, label) = dataset[unique_id]
-    if uid != unique_id:
-        raise ValueError(f"Mismatch: expected unique id {unique_id} but got {uid}")
+    # Iterate over the dataset to find the matching unique_id.
+    found = False
+    for data in dataset:
+        image, info = data
+        uid, label = info
+        # Handle batched uid values.
+        if isinstance(uid, torch.Tensor) and uid.numel() > 1:
+            uid_list = uid.tolist()
+            label_list = label.tolist() if isinstance(label, torch.Tensor) and label.numel() > 1 else label
+            for i, u in enumerate(uid_list):
+                if u == unique_id:
+                    image_entry = image[i]
+                    label_entry = label_list[i]
+                    found = True
+                    break
+            if found:
+                break
+        else:
+            uid_val = uid.item() if isinstance(uid, torch.Tensor) else uid
+            if uid_val == unique_id:
+                image_entry = image
+                label_entry = label
+                found = True
+                break
+
+    if not found:
+        raise ValueError(f"Image with unique id {unique_id} not found in the dataset.")
     
-    # Prepare the image tensor by moving it to the correct device and adding a batch dimension.
-    image_tensor = image.to(device).unsqueeze(0)
+    # Move the image to the correct device and add a batch dimension.
+    image_tensor = image_entry.to(device).unsqueeze(0)
     
     with torch.no_grad():
         reconstruction = autoencoder(image_tensor)
     
-    # Reshape the flattened image tensors into 28x28 for visualization.
+    # Reshape the flattened tensors into 28x28 images.
     original = image_tensor.view(28, 28).cpu()
     reconstructed = reconstruction.view(28, 28).cpu()
     
     # Plot original and reconstructed images side by side.
     fig, axes = plt.subplots(1, 2, figsize=(8, 4))
     axes[0].imshow(original, cmap='gray')
-    axes[0].set_title(f'Original (ID: {unique_id}, Label: {label})')
+    axes[0].set_title(f'Original (ID: {unique_id}, Label: {label_entry})')
     axes[0].axis('off')
     
     axes[1].imshow(reconstructed, cmap='gray')
@@ -43,30 +66,6 @@ def visualize_reconstruction_by_id(unique_id, autoencoder, dataset, device='cuda
     axes[1].axis('off')
     
     plt.show()
-
-
-# def visualize_image_by_idx(idx, dataset, use_flattened=True):
-#     """
-#     Visualizes a specific MNIST image given its unique index from the dataset.
-    
-#     Args:
-#         idx (int): The unique index of the image.
-#         dataset (Dataset): The MNIST dataset instance.
-#         use_flattened (bool): True if the stored image is flattened.
-#                              If True, the image will be reshaped to (28,28) for display.
-#     """
-#     # Get the image and label from the dataset
-#     image, label = dataset[idx]
-    
-#     # If the image is flattened, reshape it for visualization
-#     if use_flattened:
-#         image = image.view(28, 28)
-    
-#     plt.figure(figsize=(4, 4))
-#     plt.imshow(image.cpu(), cmap='gray')
-#     plt.title(f"Label: {label}")
-#     plt.axis("off")
-#     plt.show()
 
 
 def visualize_image_by_idx(idx, dataset, use_flattened=True):
@@ -78,25 +77,42 @@ def visualize_image_by_idx(idx, dataset, use_flattened=True):
     
     Args:
         idx (int): The unique id of the image.
-        dataset (Dataset): The MNIST dataset instance where each item is expected to be (image, (uid, label)).
+        dataset (Dataset or DataLoader): The MNIST dataset instance where each item is expected to be (image, (uid, label)).
         use_flattened (bool): True if the stored image is flattened.
                              If True, the image will be reshaped to (28,28) for display.
     """
     for data in dataset:
         image, info = data
         uid, label = info
-        if uid == idx:
-            if use_flattened:
-                image = image.view(28, 28)
-            
-            import matplotlib.pyplot as plt
-            plt.figure(figsize=(4, 4))
-            plt.imshow(image.cpu(), cmap='gray')
-            plt.title(f"Label: {label}")
-            plt.axis("off")
-            plt.show()
-            return
-    
+        # If uid is a batch tensor, iterate over its elements.
+        if isinstance(uid, torch.Tensor) and uid.numel() > 1:
+            uid_list = uid.tolist()
+            # Also convert label to list if needed.
+            label_list = label.tolist() if isinstance(label, torch.Tensor) and label.numel() > 1 else label
+            for i, u in enumerate(uid_list):
+                if u == idx:
+                    im = image[i]
+                    if use_flattened:
+                        im = im.view(28, 28)
+                    plt.figure(figsize=(4, 4))
+                    plt.imshow(im.cpu(), cmap='gray')
+                    plt.title(f"Label: {label_list[i]}")
+                    plt.axis("off")
+                    plt.show()
+                    return
+        else:
+            # Ensure uid is a scalar
+            if isinstance(uid, torch.Tensor):
+                uid = uid.item()
+            if uid == idx:
+                if use_flattened:
+                    image = image.view(28, 28)
+                plt.figure(figsize=(4, 4))
+                plt.imshow(image.cpu(), cmap='gray')
+                plt.title(f"Label: {label}")
+                plt.axis("off")
+                plt.show()
+                return
     raise ValueError(f"Image with unique id {idx} not found in the dataset.")
 
 def visualize_reconstruction_from_embedding(embedding, autoencoder, device='cuda'):

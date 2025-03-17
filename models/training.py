@@ -1,15 +1,11 @@
 import os
 import numpy as np
-from utils import set_random_seeds
 from data import sort_results
 import torch
-from .autoencoder import Autoencoder, AEClassifier
-from .VAE import VariationalAutoencoder
-from .AE_conv import AE_conv_MNIST
 from .load_from_save import get_save_dir
 
 # Train AE
-def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, trials=1, input_dim=int, beta=1.0, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
+def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, nr_runs=1, input_dim=int, beta=1.0, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -44,9 +40,9 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
     if save:
         save_dir_emb, save_dir_AE = get_save_dir(model, latent_dim)
 
-    for i in range(trials):
+    for i in range(nr_runs):
         if verbose:
-            print(f"Trial {i+1} of {trials}")
+            print(f"Trial {i+1} of {nr_runs}")
         # Create the data loaders
         # Initialize and train the autoencoder
         AE = model(input_dim=input_dim, latent_dim=latent_dim, hidden_size=hidden_layer)

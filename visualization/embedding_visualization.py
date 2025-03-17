@@ -30,6 +30,66 @@ def fit_and_align_pca(data, ref_pca=None):
     return data_pca
 
 
+# def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
+#                    is_relrep=True, anchors_list=None):
+#     """
+#     Plots multiple datasets side-by-side in subplots (1 row, len(data_list) columns).
+    
+#     data_list : list of np.ndarray
+#         Each element is a dataset (shape [n_samples, n_features]).
+#     label_list : list of np.ndarray
+#         Each element is the label array for the corresponding dataset.
+#     do_pca : bool
+#         Whether to run PCA on the data. If True, we use fit_and_align_pca.
+#     ref_pca : PCA or None
+#         If None, the first dataset's PCA becomes the reference.
+#         If not None, subsequent datasets align to this PCA orientation.
+#     get_ref_pca : bool
+#         If True, return the final PCA used for alignment (could be the first one).
+#     is_relrep : bool
+#         If True, changes the plot title to "Related Representations", else "AE Encodings".
+#     """
+    
+#     n_plots = len(data_list)
+#     fig, axs = plt.subplots(1, n_plots, figsize=(7*n_plots, 4), squeeze=False)
+#     axs = axs.ravel()  # Flatten in case there's only 1 subplot
+    
+#     for i, (data, labels) in enumerate(zip(data_list, labels_list)):
+#         if do_pca:
+#             if ref_pca is None:
+#                 pca, data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+#             else:
+#                 if is_relrep:
+#                     data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+#                 else:
+#                     _, data_2d = fit_and_align_pca(data, ref_pca=None)
+
+#             # If we didn't already have a reference, the first fitted pca becomes ref
+#             if i == 0 and ref_pca is None:
+#                 ref_pca = pca
+#         else:
+#             data_2d = data
+        
+#         scatter = axs[i].scatter(data_2d[:, 0], data_2d[:, 1],
+#                                  c=labels, cmap='tab10', s=10, alpha=0.7)
+#         if anchors_list is not None:
+#             axs[i].scatter(anchors_list[i][:, 0], anchors_list[i][:, 1], s=25, marker="*", c='#000000')
+#         # Optionally add a colorbar to each subplot
+#         cb = fig.colorbar(scatter, ax=axs[i], ticks=range(10))
+#         cb.set_label('Label')
+        
+#         axs[i].set_xlabel('PC 1')
+#         axs[i].set_ylabel('PC 2')
+#         if is_relrep:
+#             axs[i].set_title(f'2D PCA of Relative Representations {i+1}')
+#         else:
+#             axs[i].set_title(f'2D PCA of AE Encodings {i+1}')
+    
+#     plt.tight_layout()
+#     plt.show()
+
+
+# Potentially fixed so anchors are plotted in the same PCA space as the data
 def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
                    is_relrep=True, anchors_list=None, title=None):
     """
