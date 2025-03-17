@@ -11,7 +11,7 @@ import numpy as np
 from models import train_AE, load_saved_emb
 from models import *
 import torch.nn as nn
-from data import load_mnist_data
+from data import *
 from visualization import *
 from anchors import *
 from relreps import *
@@ -37,15 +37,15 @@ latent_dim = 2
 anchor_num = 2
 repetitions = 5
 nr_runs = 3
-num_epochs = 10
+num_epochs = 5
 anchor_algo = "p" # can be "random", "greedy", "p"
 
 # Hyperparameters for anchor selection
-coverage_w = 35
+coverage_w = 20
 diversity_w = 1
 exponent = 1
 
-def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader):
+def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device="cuda", use_small=True):
     abs = []
     labels_list = []
     anchor_ids = []
@@ -55,19 +55,28 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
     for i in tqdm(range(grid_size), desc="creating embeddings"):
         set_random_seeds(seed+i)
         AE_list, embeddings_list, indices, labels, train_loss, test_loss, acc_list = train_AE(
-            model=Autoencoder,
+            model=AE_conv_MNIST,
             num_epochs=num_epochs,
             batch_size=256,
             lr=1e-3,
             device=device,      
             latent_dim=2,
-            hidden_layer=512,
+            hidden_layer=None,
             trials=1,
             save=False,
-            verbose=False,
+            verbose=True,
             train_loader=train_loader,
             test_loader=test_loader
         )
+
+        if use_small:
+            indices_small = []
+            loaded_indices = np.load("2D_AE_relrep/indices_for_small_dataset.npy")
+            for idx in loaded_indices[0]:
+                indices_small.append(np.where(indices[0] == idx)[0])
+            indices_small = np.array(indices_small).flatten()
+            indices[0], labels[0], embeddings_list[0] = indices[0][indices_small], labels[0][indices_small], embeddings_list[0][indices_small]
+
         indices_list.append(indices[0])
         labels_list.append(labels[0])
         abs.append(embeddings_list[0])
@@ -110,11 +119,9 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
         for embedding in tqdm(abs, desc="getting anchors"):
             row = []
             for selector in anchor_selectors:
-                temp_anchor = selector(torch.tensor(embedding))
-                if device == "cpu":
-                    row.append(temp_anchor.cpu().detach().numpy())
-                else:
-                    row.append(temp_anchor.cuda().detach().numpy())
+                X = torch.from_numpy(embedding).to(device)
+                temp_anchor = selector(torch.tensor(X))
+                row.append(temp_anchor.cpu().detach().numpy())
 
             anchors.append(row)
 
@@ -125,14 +132,14 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
     # quit()
     rel_reps = []
     for embeddings, anchors_row in tqdm(zip(abs, anchors), desc="computing rel reps"):
-        temp_rel_reps_row = compute_relative_coordinates_cossim([embeddings]*len(anchors_row), anchors_row)
+        temp_rel_reps_row = compute_relative_coordinates_euclidean([embeddings]*len(anchors_row), anchors_row)
         rel_reps.append(temp_rel_reps_row)
-    return rel_reps, abs, labels_list
+    return rel_reps, abs, labels_list, anchors
 
 
 
 
-def plot_grid(rel_reps, abs, labels_list):
+def plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=True, save=False):
     # Number of rows = number of seeds
     num_rows = len(abs)
     # Number of columns = 1 + however many rel_reps you have per row
@@ -150,7 +157,7 @@ def plot_grid(rel_reps, abs, labels_list):
     if anchor_algo == "greedy":
         title = "Anchors chosen by greedy algorithm and their relative representation on different seeds"
     if anchor_algo == "p":
-        raise NotImplementedError()
+        title = "Anchors as linear combination and their relative representation on different seeds"
 
     fig.suptitle(title, fontsize=18)
 
@@ -194,6 +201,19 @@ def plot_grid(rel_reps, abs, labels_list):
             if i == 0:
                 ax_rel.set_title(f"From anchor set {j+1}", fontsize=15)
     plt.tight_layout()
-    plt.show()
-rel_reps, abs, labels_list = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader)
-plot_grid(rel_reps, abs, labels_list)
+    if show:
+        plt.show()
+    if save:
+        plt.savefig(f"visualization/saved_fig_{anchor_algo}")
+
+anchor_algo="random"
+rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
+plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
+
+anchor_algo="greedy"
+rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
+plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
+
+anchor_algo="p"
+rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
+plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)

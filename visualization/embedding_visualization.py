@@ -31,7 +31,7 @@ def fit_and_align_pca(data, ref_pca=None):
 
 
 def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
-                   is_relrep=True, anchors_list=None):
+                   is_relrep=True, anchors_list=None, title=None):
     """
     Plots multiple datasets side-by-side in subplots (1 row, len(data_list) columns).
     
@@ -80,8 +80,8 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
         
         axs[i].set_xlabel('PC 1')
         axs[i].set_ylabel('PC 2')
-        if is_relrep:
-            axs[i].set_title(f'2D PCA of Relative Representations {i+1}')
+        if title is None:
+            axs[i].set_title(f'user to lazy to set title {i+1}')
         else:
             axs[i].set_title(f'2D PCA of AE Encodings {i+1}')
     

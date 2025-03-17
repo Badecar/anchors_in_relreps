@@ -83,7 +83,10 @@ def create_visualization_subset_indices(emb_list, idx_list, topn=200, num_pivots
 
     # 1. Select random pivot indices.
     pivot_indices = greedy_one_at_a_time_single_euclidean(embeddings_list=emb_list, indices_list=idx_list,
-                                                          num_anchors=num_pivots, repetitions=2)
+                                                          num_anchors=num_pivots, repetitions=3)
+    np.save("2D_AE_relrep/pivot_indices", pivot_indices)
+    quit()
+    pivot_indices = np.load("2D_AE_relrep/pivot_indices")
     subset_indices = set(pivot_indices)
     
     # Precompute norms for cosine similarity

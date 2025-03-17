@@ -192,7 +192,7 @@ class AE_conv_MNIST(nn.Module):
         # Project conv features to latent space.
         self.encoder_out = nn.Sequential(
             nn.Linear(encoder_out_numel, latent_dim),
-            latent_activation() if latent_activation is not None else nn.Identity(),
+            #latent_activation() if latent_activation is not None else nn.Identity(),
         )
         # Project latent vector back to conv features.
         self.decoder_in = nn.Sequential(
