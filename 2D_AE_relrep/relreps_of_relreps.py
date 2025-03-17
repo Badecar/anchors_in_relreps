@@ -27,7 +27,6 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 train_loader, test_loader, val_loader = load_mnist_data()
 loader = val_loader
 use_small_dataset = True
-### MAKE SURE THAT WE ARE USING THE SAME DATA FOR ALL FUNCTIONS ###
 
 # TODO: CURRENTLY USING OLD VERSION OF THE AE FOR TESTING. NEED TO UPDATE TO NEW VERSION
 
@@ -64,7 +63,7 @@ AE_list, emb_list_train, idx_list_train, labels_list_train, train_loss_list_AE, 
     device=device,      
     latent_dim=latent_dim,
     hidden_layer=128,
-    trials=nr_runs,
+    nr_runs=nr_runs,
     save=False,
     verbose=False,
     train_loader=train_loader,

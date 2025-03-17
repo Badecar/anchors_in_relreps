@@ -120,27 +120,3 @@ class rel_AE_conv_MNIST(nn.Module):
                 print(f'Epoch #{epoch}')
                 print(f'Train Loss = {train_loss:.3e} --- Test Loss = {test_loss:.3e}')
         return train_loss_list, test_loss_list
-
-    def get_latent_embeddings(self, data_loader, device='cpu'):
-        """
-        Returns the relative representations from the provided DataLoader.
-        Expected loader yields (relative_representation, (index, label)).
-        """
-        embeddings = []
-        indices = []
-        labels = []
-        self.eval()
-        with torch.no_grad():
-            for rel_emb, (idx, lab) in data_loader:
-                rel_emb = rel_emb.to(device)
-                embeddings.append(rel_emb)
-                indices.append(idx)
-                labels.append(lab)
-        embeddings_concat = torch.cat(embeddings, dim=0)
-        indices_concat = torch.cat(indices, dim=0)
-        labels_concat  = torch.cat(labels, dim=0)
-        sorted_order = torch.argsort(indices_concat)
-        embeddings_sorted = embeddings_concat[sorted_order]
-        indices_sorted = indices_concat[sorted_order]
-        labels_sorted = labels_concat[sorted_order]
-        return embeddings_sorted, indices_sorted, labels_sorted
