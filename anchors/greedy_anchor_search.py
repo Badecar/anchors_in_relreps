@@ -204,7 +204,7 @@ def greedy_one_at_a_time_single_euclidean(embeddings_list, indices_list, num_anc
         n_pairs = len(pairwise_distances)
         return np.mean(pairwise_distances) / n_pairs
     # Greedily add anchors.
-    for _ in tqdm(range(num_anchors*repetitions), desc="Selecting anchors", disable=not(verbose)):
+    for _ in tqdm(range(num_anchors*repetitions), desc="Selecting anchors"):
         if _ == 0:
             init_idx = random.sample(list(indices_list[0]), 1)[0]
             init_idx_multiple = [np.where(indices_temp == init_idx)[0] for indices_temp in indices_list]
@@ -292,7 +292,7 @@ def greedy_one_at_a_time_single_euclidean(embeddings_list, indices_list, num_anc
             """
             dists and min dists should be for each embedding space
             """
-            dists_list = [np.array([np.linalg.norm(embeddings - embeddings[indices==index], axis=1) for anchor, index in zip(anchors_idx, indices)]).T for embeddings, indices in zip(embeddings_list, indices_list)]
+            dists_list = [np.array([np.linalg.norm(embeddings - embeddings[indices==anchor], axis=1) for anchor, index in zip(anchors_idx, indices)]).T for embeddings, indices in zip(embeddings_list, indices_list)]
             min_dists_list = [np.min(dists, axis=1) for dists in dists_list]
 
     return anchors_idx

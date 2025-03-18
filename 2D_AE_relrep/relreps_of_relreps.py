@@ -31,7 +31,7 @@ use_small_dataset = True
 # TODO: CURRENTLY USING OLD VERSION OF THE AE FOR TESTING. NEED TO UPDATE TO NEW VERSION
 
 ### PARAMETERS ###
-model = Autoencoder #AEClassifier or Autoencoder
+model = AE_conv_MNIST #AEClassifier or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
 latent_dim = 2         # If load_saved: Must match an existing dim
@@ -39,12 +39,12 @@ anchor_num = 2
 nr_runs = 2            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
-num_epochs = 1
+num_epochs = 4
 lr = 1e-3
 
 # Hyperparameters for anchor selection
-coverage_w = 0.92
-diversity_w = 0.08
+coverage_w = 0.8
+diversity_w = 0.2
 exponent = 1
 
 # Post-processing
@@ -63,7 +63,7 @@ AE_list, emb_list_train, idx_list_train, labels_list_train, train_loss_list_AE, 
     device=device,      
     latent_dim=latent_dim,
     hidden_layer=128,
-    nr_runs=nr_runs,
+    trials=nr_runs,
     save=False,
     verbose=False,
     train_loader=train_loader,
@@ -98,8 +98,8 @@ anchor_ids = greedy_one_at_a_time_single_euclidean(relrep_list, idx_list, num_an
                                                           repetitions=3, diversity_weight=diversity_w, 
                                                           Coverage_weight=coverage_w, verbose=False)
 
-anchor_list = select_anchors_by_id(AE_list, relrep_list, idx_list, anchor_ids)
-relrep_list = compute_relative_coordinates_euclidean(relrep_list, anchor_list)
+anchor_list_2 = select_anchors_by_id(AE_list, relrep_list, idx_list, anchor_ids)
+relrep_list_2 = compute_relative_coordinates_euclidean(relrep_list, anchor_list)
 
 if plot_results:
     # Plot encodings side by side
@@ -110,13 +110,13 @@ if plot_results:
     # else:
     #     print("Plotting absolute embeddings")
     #     plot_data_list(emb_list, labels_list, do_pca=True, is_relrep=is_relrep, anchors_list=rand_anchors_list)
-    print("Plotting absolute embeddings")
     plot_data_list(emb_list, labels_list, do_pca=False, is_relrep=False, anchors_list=anchor_list)
-    print("Plotting relrep")
-    plot_data_list(relrep_list, labels_list, do_pca=False, is_relrep=False, anchors_list=anchor_list)
+    plot_data_list(relrep_list, labels_list, do_pca=False, is_relrep=False, anchors_list=anchor_list_2)
+    plot_data_list(relrep_list_2, labels_list, do_pca=False, is_relrep=False, anchors_list=None)
+
 
 
 
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, verbose=False)
+    compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, verbose=False)
