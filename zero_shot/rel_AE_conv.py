@@ -55,7 +55,8 @@ class rel_AE_conv_MNIST(nn.Module):
             remove_encoder_last_activation=False,
         )
 
-    def decode(self, relative_embedding):
+
+    def decode(self, relative_embedding): # For conv decover
         """
         Decodes relative representations into flattened MNIST images.
         
@@ -70,6 +71,19 @@ class rel_AE_conv_MNIST(nn.Module):
         x_rec = self.decoder(decoder_in_conv)
         # Flatten the reconstructed image
         x_rec = x_rec.view(x_rec.size(0), -1)
+        return x_rec
+    
+    def _decode(self, relative_embedding): # For fc decoder
+        """
+        Decodes relative representations into flattened MNIST images.
+        
+        Args:
+            relative_embedding (Tensor): shape [batch_size, relative_dim]
+        Returns:
+            x_rec (Tensor): flattened reconstructions with shape [batch_size, 784]
+        """
+        latent = self.decoder_in(relative_embedding)
+        x_rec = self.decoder(latent)
         return x_rec
 
     def forward(self, relative_embedding):

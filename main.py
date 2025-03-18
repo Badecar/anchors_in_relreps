@@ -11,8 +11,7 @@ from relreps import *
 from zero_shot import *
 
 # For reproducibility and consistency across runs, we set a seed
-seed = 42
-set_random_seeds(42)
+set_random_seeds(43)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
@@ -20,22 +19,16 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 # Load data
 train_loader, test_loader, val_loader = load_mnist_data()
 loader = val_loader
-use_small_dataset = False
+use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
 model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
-head_type = 'reconstructor'    #reconstructor or classifier
-distance_measure = 'cosine'   #cosine or euclidean
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 30         # If load_saved: Must match an existing dim
+dim = 20         # If load_saved: Must match an existing dim
 anchor_num = dim
-nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
-
-# Train parameters
-num_epochs = 10
-lr = 1e-3
-hidden_layer = 128 if model != AE_conv_MNIST else None
+nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
+hidden_layer = 128 if model != AE_conv_MNIST else (64, 128, 256, 512) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
 
 # Hyperparameters for anchor selection
 coverage_w = 0.92 # Coverage of embeddings
@@ -44,10 +37,9 @@ exponent = 1
 
 # Post-processing
 zero_shot = True
-plot_embeddings = False
-compute_mrr = False      # Only set true if you have >32GB of RAM, and very low dim
+plot_embeddings = True
+compute_mrr = True      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
-compute_relrep_loss = False # Can only compute if not loading from save
 ### ###
 
 if load_saved:
@@ -59,9 +51,9 @@ else:
     # Run experiment. Return the Train embeddings
     model_list, emb_list_train, idx_list_train, labels_list_train, train_loss_list_AE, test_loss_list_AE, acc_list = train_AE(
         model=model,
-        num_epochs=num_epochs,
+        num_epochs=8,
         batch_size=256,
-        lr=lr,
+        lr=1e-3,
         device=device,      
         latent_dim=dim,
         hidden_layer=hidden_layer,
@@ -75,7 +67,6 @@ else:
     )
 
 # Getting Tets and Validation embeddings (sorted by index)
-print("Getting embeddings for test and validation set")
 emb_list, idx_list, labels_list = get_embeddings(loader, model_list, device=device)
 
 # Creates a smaller dataset from the test embeddings with balanced class counts. It is sorted by index, so each run corresponds to each other
@@ -88,10 +79,14 @@ small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_data
 if use_small_dataset: emb_list, idx_list, labels_list = small_dataset_emb, small_dataset_idx, small_dataset_labels
 
 # Find anchors and compute relative coordinates
+set_random_seeds(42)
 random_anchor_ids = random.sample(list(idx_list[0]), anchor_num)
+set_random_seeds(43)
 rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_anchor_ids, loader.dataset, show=False, device=device)
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
+# TODO: Check the loss of this, is it converging, or do we need to fix the weights?
+# TODO: Currently we are only optimizing with euclidian. We should also implement cossim
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list = get_optimized_anchors(
     emb = small_dataset_emb,
@@ -104,14 +99,17 @@ _, P_anchors_list = get_optimized_anchors(
     verbose=False,
     device=device,
 )
-anch_list = rand_anchors_list
+anch_list = P_anchors_list
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_euclidean(emb_list, anch_list)
+relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
 
 ### ZERO-SHOT STITCHING ###
+# NOTE: Decoder seems to work fine, but the relreps are hindering the performance
 if zero_shot:
     rel_decoder, rel_train_loss, rel_test_loss = train_rel_decoder(
+        epochs=15,
+        hidden_dims=hidden_layer,
         rel_model=rel_AE_conv_MNIST,
         model_list=model_list,
         relrep_list=relrep_list,
@@ -127,7 +125,7 @@ if zero_shot:
 if plot_embeddings:
     do_pca = dim > 2
     print("Plotting absolute embeddings")
-    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=False, anchors_list=anch_list)
+    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=True, anchors_list=anch_list)
     print("Plotting relrep")
     plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True)
 

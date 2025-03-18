@@ -3,7 +3,7 @@ from torchvision import transforms
 import torch
 import random
 
-def train_rel_decoder(rel_model, model_list, relrep_list, idx_list, loader, device, nr_runs, show=True, verbose=True):
+def train_rel_decoder(epochs, hidden_dims, rel_model, model_list, relrep_list, idx_list, loader, device, nr_runs, show=True, verbose=True):
     """
     Train the relative decoder using zero-shot stitching on a validation set.
     This function performs the following steps:
@@ -66,25 +66,24 @@ def train_rel_decoder(rel_model, model_list, relrep_list, idx_list, loader, devi
     rel_decoder = rel_model(
         relative_output_dim=first_relrep.size(1),
         encoder_out_shape=model_list[0].encoder_out_shape,  # expected conv feature map shape
-        n_channels=model_list[0].image_shape[0]             # e.g., 1 for MNIST
+        n_channels=model_list[0].image_shape[0],             # e.g., 1 for MNIST
+        hidden_dims = hidden_dims
     )
     rel_decoder.to(device)
 
     # Train the relative decoder.
-    num_epochs_rel = 10  # adjust as needed
     train_losses, val_losses = rel_decoder.fit(
         train_loader=rel_decoder_loader,
         test_loader=rel_decoder_loader,
-        num_epochs=num_epochs_rel,
+        num_epochs=epochs,
         lr=1e-3,
         device=device,
         verbose=verbose
     )
 
     if show:
-        sample_indices = random.sample(range(len(loader.dataset)), 3)
-        # for run in range(nr_runs):
-            
+        sample_indices = random.sample(range(len(loader.dataset)), 16)
+        sample_indices = list(range(20, 37))
         plot_reconstructions(
             rel_decoder=rel_decoder,
             relreps_list=relrep_list,

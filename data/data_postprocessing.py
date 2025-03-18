@@ -13,7 +13,7 @@ def get_embeddings(loader, model_list, device):
             - idx_list (list): A list of numpy arrays containing the indices corresponding to the embeddings for each model.
             - labels_list (list): A list of numpy arrays with the labels corresponding to the data from each model.
     """
-    
+    print("Getting embeddings for test and chosen loader set")
     emb_list = []
     idx_list = []
     labels_list = []
