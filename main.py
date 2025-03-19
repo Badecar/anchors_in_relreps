@@ -3,7 +3,6 @@ import torch
 import random
 import numpy as np
 from models import *
-import torch.nn as nn
 from data import *
 from visualization import *
 from anchors import *
@@ -18,20 +17,22 @@ print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 
 # Load data
 train_loader, test_loader, val_loader = load_mnist_data()
+data = "MNIST"
 loader = val_loader
 use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
-model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
+#NOTE: Conv_old gets best results with numbers, new with fashion
+model = AE_conv_MNIST_old #VariationalAutoencoder, AEClassifier, or Autoencoder
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 20         # If load_saved: Must match an existing dim
+dim = 100         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
-hidden_layer = 128 if model != AE_conv_MNIST else (64, 128, 256, 512) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
+hidden_layer = (32, 64, 128) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
 
 # Hyperparameters for anchor selection
-coverage_w = 0.92 # Coverage of embeddings
+coverage_w = 0.90 # Coverage of embeddings
 diversity_w = 1 - coverage_w # Pairwise between anchors
 exponent = 1
 
@@ -43,15 +44,15 @@ compute_similarity = True
 ### ###
 
 if load_saved:
-    emb_list_train, idx_list_train, labels_list_train = load_saved_emb(model, nr_runs=nr_runs, latent_dim=dim)
-    model_list = load_AE_models(model=model, nr_runs=nr_runs, latent_dim=dim, hidden_layer=hidden_layer, device=device)
+    emb_list_train, idx_list_train, labels_list_train = load_saved_emb(model, nr_runs=nr_runs, latent_dim=dim, data=data)
+    model_list = load_AE_models(model=model, nr_runs=nr_runs, latent_dim=dim, hidden_layer=hidden_layer, device=device, data=data)
     # Initializing empty lists as to not break the code below
     acc_list, train_loss_list_AE,test_loss_list_AE = np.zeros(nr_runs), np.zeros(nr_runs), np.zeros(nr_runs)
 else:
     # Run experiment. Return the Train embeddings
     model_list, emb_list_train, idx_list_train, labels_list_train, train_loss_list_AE, test_loss_list_AE, acc_list = train_AE(
         model=model,
-        num_epochs=8,
+        num_epochs=10,
         batch_size=256,
         lr=1e-3,
         device=device,      
@@ -63,7 +64,7 @@ else:
         train_loader=train_loader,
         test_loader=test_loader,
         input_dim=28*28,
-        beta=1
+        data=data
     )
 
 # Getting Tets and Validation embeddings (sorted by index)
@@ -79,9 +80,7 @@ small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_data
 if use_small_dataset: emb_list, idx_list, labels_list = small_dataset_emb, small_dataset_idx, small_dataset_labels
 
 # Find anchors and compute relative coordinates
-set_random_seeds(42)
 random_anchor_ids = random.sample(list(idx_list[0]), anchor_num)
-set_random_seeds(43)
 rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_anchor_ids, loader.dataset, show=False, device=device)
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
@@ -96,13 +95,15 @@ _, P_anchors_list = get_optimized_anchors(
     coverage_weight=coverage_w,
     diversity_weight=diversity_w,
     exponent=exponent,
-    verbose=False,
+    verbose=True,
     device=device,
 )
-anch_list = P_anchors_list
+anch_list = rand_anchors_list
 
 # Compute relative coordinates for the embeddings
 relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
+
+# visualize_reconstruction_by_id(idx_list[0][1], model_list[0], loader, device)
 
 ### ZERO-SHOT STITCHING ###
 # NOTE: Decoder seems to work fine, but the relreps are hindering the performance
@@ -124,10 +125,14 @@ if zero_shot:
 ### Plotting embeddings ###
 if plot_embeddings:
     do_pca = dim > 2
+    if do_pca:
+        title = f"PCA, {dim}D, "
+    else:
+        title = ""
     print("Plotting absolute embeddings")
-    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=True, anchors_list=anch_list)
+    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=True, anchors_list=anch_list, title=f"{title}Absolute Embeddings")
     print("Plotting relrep")
-    plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True)
+    plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True, title=f"{title}Relative Representations")
 
 # NOTE: Watch out with comparing cosine sim between cossim- and eucl relreps.
 #   The eucl relreps are only in the first quadrant, so cosine sim will be higher
