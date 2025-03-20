@@ -5,7 +5,7 @@ import torch
 from .load_from_save import get_save_dir
 
 # Train AE
-def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, nr_runs=1, input_dim=int, beta=1.0, use_test=True, save=False, verbose=False, train_loader=None, test_loader=None):
+def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent_dim = 2, hidden_layer = 128, nr_runs=1, input_dim=int, save=False, verbose=False, train_loader=None, test_loader=None, data=None):
     """
     Orchestrates the autoencoder pipeline:
       1. Load data
@@ -38,7 +38,7 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
     # Create the directory to save embeddings if needed.
     
     if save:
-        save_dir_emb, save_dir_AE = get_save_dir(model, latent_dim)
+        save_dir_emb, save_dir_AE = get_save_dir(model, latent_dim, data)
 
     for i in range(nr_runs):
         if verbose:

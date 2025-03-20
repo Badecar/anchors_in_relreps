@@ -3,159 +3,11 @@ from tqdm import tqdm
 from typing import Optional, Sequence, Tuple
 import torch.nn as nn
 import math
+import torch.nn.functional as F
+from .build_encoder_decoder import build_dynamic_encoder_decoder
 
 
-def infer_dimension(width: int, height: int, n_channels: int, model: nn.Module, batch_size: int = 8) -> torch.Tensor:
-    """Compute the output of a model given a fake batch.
-
-    Args:
-        width: the width of the image to generate the fake batch
-        height:  the height of the image to generate the fake batch
-        n_channels:  the n_channels of the image to generate the fake batch
-        model: the model to use to compute the output
-        batch_size: batch size to use for the fake output
-
-    Returns:
-        the fake output
-    """
-    with torch.no_grad():
-        fake_batch = torch.zeros([batch_size, n_channels, width, height])
-        fake_out = model(fake_batch)
-        return fake_out
-
-
-def build_transposed_convolution(
-    in_channels: int,
-    out_channels: int,
-    target_output_width,
-    target_output_height,
-    input_width,
-    input_height,
-    stride: Tuple[int, int] = (1, 1),
-    padding: Tuple[int, int] = (1, 1),
-    output_padding: Tuple[int, int] = (0, 0),
-    dilation: int = 1,
-) -> nn.ConvTranspose2d:
-    # kernel_w = (metadata.width - (fake_out.width −1)×stride[0] + 2×padding[0] - output_padding[0]  - 1)/dilation[0] + 1
-    # kernel_h = (metadata.height - (fake_out.height −1)×stride[1] + 2×padding[1] - output_padding[1]  - 1)/dilation[1] + 1
-    kernel_w = (
-        target_output_width - (input_width - 1) * stride[0] + 2 * padding[0] - output_padding[0] - 1
-    ) / dilation + 1
-    kernel_h = (
-        target_output_height - (input_height - 1) * stride[1] + 2 * padding[1] - output_padding[1] - 1
-    ) / dilation + 1
-    assert kernel_w > 0 and kernel_h > 0
-
-    return nn.ConvTranspose2d(
-        in_channels=in_channels,
-        out_channels=out_channels,
-        kernel_size=(int(kernel_w), int(kernel_h)),
-        stride=stride,
-        padding=padding,
-        output_padding=output_padding,
-        dilation=dilation,
-    )
-
-
-def build_dynamic_encoder_decoder(
-    width,
-    height,
-    n_channels,
-    hidden_dims: Optional[Sequence[int]],
-    activation: nn.GELU,
-    remove_encoder_last_activation: bool = False,
-) -> Tuple[nn.Module, Sequence[int], nn.Module]:
-    """Builds a dynamic convolutional encoder-decoder pair with parametrized hidden dimensions number and size.
-
-    Args:
-        width: the width of the images to work with
-        height: the height of the images
-        n_channels: the number of channels of the images
-        hidden_dims: a sequence of ints to specify the number and size of the hidden layers in the encoder and decoder
-
-    Returns:
-        the encoder, the shape in the latent space, the decoder
-    """
-    modules = []
-
-    if hidden_dims is None:
-        hidden_dims = (32, 64, 128, 256)
-
-    STRIDE = (2, 2)
-    PADDING = (1, 1)
-
-    # Build Encoder
-    encoder_shape_sequence = [
-        [width, height],
-    ]
-    running_channels = n_channels
-    for i, h_dim in enumerate(hidden_dims):
-        modules.append(
-            nn.Sequential(
-                (
-                    conv2d := nn.Conv2d(
-                        running_channels, out_channels=h_dim, kernel_size=3, stride=STRIDE, padding=PADDING
-                    )
-                ),
-                nn.BatchNorm2d(h_dim),
-                nn.Identity()
-                if i == len(hidden_dims) - 1 and remove_encoder_last_activation
-                else activation(),
-            )
-        )
-        conv2d_out = infer_dimension(
-            encoder_shape_sequence[-1][0],
-            encoder_shape_sequence[-1][1],
-            running_channels,
-            conv2d,
-        )
-        encoder_shape_sequence.append([conv2d_out.shape[2], conv2d_out.shape[3]])
-        running_channels = h_dim
-
-    encoder = nn.Sequential(*modules)
-
-    encoder_out_shape = infer_dimension(width, height, n_channels=n_channels, model=encoder, batch_size=1).shape
-
-    # Build Decoder
-    hidden_dims = list(reversed(hidden_dims))
-    hidden_dims = hidden_dims + hidden_dims[-1:]
-
-    running_input_width = encoder_out_shape[2]
-    running_input_height = encoder_out_shape[3]
-    modules = []
-    for i, (target_output_width, target_output_height) in zip(
-        range(len(hidden_dims) - 1), reversed(encoder_shape_sequence[:-1])
-    ):
-        modules.append(
-            nn.Sequential(
-                build_transposed_convolution(
-                    in_channels=hidden_dims[i],
-                    out_channels=hidden_dims[i + 1],
-                    target_output_width=target_output_width,
-                    target_output_height=target_output_height,
-                    input_width=running_input_width,
-                    input_height=running_input_height,
-                    stride=STRIDE,
-                    padding=PADDING,
-                ),
-                nn.BatchNorm2d(hidden_dims[i + 1]),
-                activation(),
-            )
-        )
-        running_input_width = target_output_width
-        running_input_height = target_output_height
-
-    decoder = nn.Sequential(
-        *modules,
-        nn.Sequential(
-            nn.Conv2d(hidden_dims[-1], out_channels=n_channels, kernel_size=3, padding=1),
-            nn.Sigmoid(),
-        ),
-    )
-    return encoder, encoder_out_shape, decoder
-
-
-class AE_conv_MNIST(nn.Module):
+class AE_conv(nn.Module):
     """
     Convolutional Autoencoder with a bottleneck of size latent_dim.
     
@@ -192,7 +44,8 @@ class AE_conv_MNIST(nn.Module):
         # Project conv features to latent space.
         self.encoder_out = nn.Sequential(
             nn.Linear(encoder_out_numel, latent_dim),
-            #latent_activation() if latent_activation is not None else nn.Identity(),
+            nn.BatchNorm1d(latent_dim),
+            # latent_activation() if latent_activation is not None else nn.Identity(),
         )
         # Project latent vector back to conv features.
         self.decoder_in = nn.Sequential(
@@ -238,13 +91,35 @@ class AE_conv_MNIST(nn.Module):
         """
         return self.decode(self.encode(x))
 
-    def train_one_epoch(self, train_loader, optimizer, criterion, device='cuda'):
+    def loss_function(self, model_out, batch, *args, **kwargs) -> dict:
+        """https://stackoverflow.com/questions/64909658/what-could-cause-a-vaevariational-autoencoder-to-output-random-noise-even-afte
+
+        Computes the VAE loss function.
+        KL(N(mu, sigma), N(0, 1)) = log frac{1}{sigma} + frac{sigma^2 + mu^2}{2} - frac{1}{2}
+        """
+        predictions = model_out  # In this AE, model_out is the reconstructed output.
+        targets = batch["image"]
+        mse = F.mse_loss(predictions, targets, reduction="mean")
+        log_sigma_opt = 0.5 * mse.log()
+        # r_loss = 0.5 * torch.pow((targets - predictions) / log_sigma_opt.exp(), 2) + log_sigma_opt
+        r_loss = log_sigma_opt
+
+        r_loss = r_loss.sum()
+        loss = r_loss
+        return {
+            "loss": loss,
+            "reconstruction": r_loss.detach() / targets.shape[0],
+        }
+
+    def train_one_epoch(self, train_loader, optimizer, device='cuda'):
         loss_total = 0.0
         self.train()
         for x, _ in train_loader:
             x = x.to(device)
             reconstructed = self.forward(x)
-            loss = criterion(reconstructed, x)
+            # Wrap x into a dictionary with key "image".
+            loss_dict = self.loss_function(reconstructed, {"image": x})
+            loss = loss_dict["loss"]
             loss_total += loss.item()
             optimizer.zero_grad()
             loss.backward()
@@ -252,27 +127,26 @@ class AE_conv_MNIST(nn.Module):
         epoch_loss = loss_total / len(train_loader)
         return epoch_loss
 
-    def evaluate(self, data_loader, criterion, device='cuda'):
+    def evaluate(self, data_loader, device='cuda'):
         self.eval()
         loss_total = 0.0
         with torch.no_grad():
             for x, _ in data_loader:
                 x = x.to(device)
                 reconstructed = self.forward(x)
-                loss = criterion(reconstructed, x)
-                loss_total += loss.item()
+                loss_dict = self.loss_function(reconstructed, {"image": x})
+                loss_total += loss_dict["loss"].item()
         eval_loss = loss_total / len(data_loader)
         return eval_loss
 
     def fit(self, train_loader, test_loader, num_epochs, lr=1e-3, device='cuda', verbose=True):
         self.to(device)
         optimizer = torch.optim.Adam(self.parameters(), lr=lr)
-        loss_function = nn.MSELoss()
         train_loss_list, test_loss_list = [], []
         for epoch in tqdm(range(num_epochs), desc="Training Epochs", disable=not verbose):
-            train_loss = self.train_one_epoch(train_loader, optimizer, criterion=loss_function, device=device)
+            train_loss = self.train_one_epoch(train_loader, optimizer, device=device)
             train_loss_list.append(train_loss)
-            test_loss = self.evaluate(test_loader, criterion=loss_function, device=device)
+            test_loss = self.evaluate(test_loader, device=device)
             test_loss_list.append(test_loss)
             if verbose:
                 print(f'Epoch #{epoch}')
@@ -303,14 +177,15 @@ class AE_conv_MNIST(nn.Module):
     def validate(self, data_loader, device='cuda'):
         self.eval()
         losses = []
-        criterion = nn.MSELoss(reduction='none')
         with torch.no_grad():
             for x, _ in data_loader:
                 x = x.to(device)
                 reconstructed = self.forward(x)
-                loss = criterion(reconstructed, x).mean(dim=1)
+                loss_dict = self.loss_function(reconstructed, {"image": x})
+                # Compute per-sample loss (assuming reduction inside loss_function was sum, so we re-compute per sample)
+                loss = loss_dict["loss"]
                 losses.append(loss)
-        losses = torch.cat(losses)
+        losses = torch.stack(losses)
         mse_mean = losses.mean().item()
         mse_std = losses.std().item()
         return mse_mean, mse_std

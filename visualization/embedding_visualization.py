@@ -104,10 +104,10 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
     ref_pca : PCA or None
         If None, the first dataset's PCA becomes the reference.
         If not None, subsequent datasets align to this PCA orientation.
-    get_ref_pca : bool
-        If True, return the final PCA used for alignment (could be the first one).
     is_relrep : bool
         If True, changes the plot title to "Related Representations", else "AE Encodings".
+    title: str or None
+        Custom title for plots. If None, a default title is set.
     """
     
     n_plots = len(data_list)
@@ -116,24 +116,40 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
     
     for i, (data, labels) in enumerate(zip(data_list, labels_list)):
         if do_pca:
+            # For the first dataset, or when ref_pca is None, fit PCA and use it as reference.
             if ref_pca is None:
                 pca, data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+                pca_current = pca
             else:
                 if is_relrep:
+                    # Align current data with the existing reference PCA.
                     data_2d = fit_and_align_pca(data, ref_pca=ref_pca)
+                    pca_current = ref_pca
                 else:
+                    # Compute PCA independently for current data.
                     _, data_2d = fit_and_align_pca(data, ref_pca=None)
+                    # No common PCA space; anchors (if any) are assumed pre-transformed.
+                    pca_current = None
 
-            # If we didn't already have a reference, the first fitted pca becomes ref
             if i == 0 and ref_pca is None:
-                ref_pca = pca
+                ref_pca = pca_current
         else:
             data_2d = data
+            pca_current = None
         
         scatter = axs[i].scatter(data_2d[:, 0], data_2d[:, 1],
                                  c=labels, cmap='tab10', s=10, alpha=0.7)
+        
+        # Transform anchors using the same PCA if available
         if anchors_list is not None:
-            axs[i].scatter(anchors_list[i][:, 0], anchors_list[i][:, 1], s=25, marker="*", c='#000000')
+            anchors = anchors_list[i]
+            if do_pca and (pca_current is not None):
+                anchors_2d = pca_current.transform(anchors)
+            else:
+                anchors_2d = anchors
+            axs[i].scatter(anchors_2d[:, 0], anchors_2d[:, 1], 
+                           s=25, marker="*", c='#000000')
+        
         # Optionally add a colorbar to each subplot
         cb = fig.colorbar(scatter, ax=axs[i], ticks=range(10))
         cb.set_label('Label')

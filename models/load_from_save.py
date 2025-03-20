@@ -2,25 +2,26 @@ import os
 import numpy as np
 import torch
 from .autoencoder import Autoencoder, AEClassifier
+from .AE_conv_MNIST_old import AE_conv_MNIST_old
 from .VAE import VariationalAutoencoder
-from .AE_conv_MNIST import AE_conv_MNIST
+from .AE_conv_MNIST import AE_conv
 
-def get_save_dir(model, latent_dim):
+def get_save_dir(model, latent_dim, data="FMNIST"):
     if model == AEClassifier:
             m = 'AEClassifier'
     elif model == Autoencoder:
             m = 'AE'
     elif model == VariationalAutoencoder:
             m = 'VAE'
-    elif model == AE_conv_MNIST:
+    elif model == AE_conv or AE_conv_MNIST_old:
             m = 'AE_conv_MNIST'
-    save_dir_emb = os.path.join("experiments", "saved_embeddings", m, f"dim{latent_dim}")
-    save_dir_AE = os.path.join("experiments", "saved_models", m, f"dim{latent_dim}")
+    save_dir_emb = os.path.join("experiments", data,"saved_embeddings", m, f"dim{latent_dim}")
+    save_dir_AE = os.path.join("experiments", data,"saved_models", m, f"dim{latent_dim}")
     os.makedirs(save_dir_AE, exist_ok=True)
     os.makedirs(save_dir_emb, exist_ok=True)
     return save_dir_emb, save_dir_AE
 
-def load_saved_emb(model, nr_runs=1, latent_dim=int, save_dir=None):
+def load_saved_emb(model, nr_runs=1, latent_dim=int, save_dir=None, data="FMNIST"):
     """
     Loads saved embeddings, indices, and labels from the saved embeddings directory.
     
@@ -37,7 +38,7 @@ def load_saved_emb(model, nr_runs=1, latent_dim=int, save_dir=None):
     """
     print("Loading saved embeddings and models")
     if save_dir is None:
-        save_dir, _ = get_save_dir(model, latent_dim)
+        save_dir, _ = get_save_dir(model, latent_dim, data)
     
     embeddings_list = []
     indices_list = []
@@ -63,7 +64,7 @@ def load_saved_emb(model, nr_runs=1, latent_dim=int, save_dir=None):
         
     return embeddings_list, indices_list, labels_list
 
-def load_AE_models(model, nr_runs=1, latent_dim=2, input_dim=28*28, hidden_layer=128, save_dir_AE=None, device='cuda'):
+def load_AE_models(model, nr_runs=1, latent_dim=2, input_dim=28*28, hidden_layer=128, save_dir_AE=None, device='cuda', data="FMNIST"):
     """
     Loads a specified number of saved AE (or AEClassifier) models into a list.
     
@@ -80,16 +81,14 @@ def load_AE_models(model, nr_runs=1, latent_dim=2, input_dim=28*28, hidden_layer
         list: A list of loaded models. Models not found will be skipped.
     """
     if save_dir_AE is None:
-        _, save_dir_AE = get_save_dir(model, latent_dim)
+        _, save_dir_AE = get_save_dir(model, latent_dim, data)
     AE_list = []
     for i in range(1, nr_runs + 1):
         model_path = os.path.join(save_dir_AE, f'ae_trial_{i}_dim{latent_dim}.pth')
         if os.path.exists(model_path):
-            # For VAE, initialize with input_dim, hidden_dims and beta; otherwise, use hidden_size.
+            # For VAE, initialize with input_dim, hidden_dims; otherwise, use hidden_size.
             if model.__name__ == "VariationalAutoencoder":
                 # Ensure input_dim is provided; you might consider adding input_dim as a parameter to load_AE_models.
-                # loaded_model = model(input_dim=input_dim, latent_dim=latent_dim,
-                                    #  hidden_dims=[hidden_layer, hidden_layer // 2], beta=1)
                 loaded_model = model(input_dim=input_dim, latent_dim=latent_dim,
                                      hidden_size=hidden_layer)                    
             else:

@@ -39,6 +39,33 @@ def coverage_loss(anchors, embeddings):
     min_dists, _ = torch.min(dists, dim=1)
     return torch.mean(min_dists)
 
+# def diversity_loss(anchors, exponent=0.5):
+#     # anchors: [N_anchors, D]
+#     # Normalize anchors so that cosine similarity can be computed.
+#     anchors_norm = F.normalize(anchors, p=2, dim=1)
+#     # Compute the cosine similarity matrix.
+#     sim_matrix = anchors_norm @ anchors_norm.t()
+#     # Get the upper triangular part without the diagonal.
+#     idx = torch.triu_indices(sim_matrix.size(0), sim_matrix.size(1), offset=1)
+#     cosine_sim_values = sim_matrix[idx[0], idx[1]]
+#     # Convert similarity to cosine distance.
+#     cosine_distance = 1 - cosine_sim_values
+#     # Negative so that maximizing distance reduces the loss.
+#     return -torch.mean(cosine_distance ** exponent)
+
+
+# def coverage_loss(anchors, embeddings):
+#     # Normalize embeddings and anchors.
+#     anchors_norm = F.normalize(anchors, p=2, dim=1)
+#     emb_norm = F.normalize(embeddings, p=2, dim=1)
+#     # Compute cosine similarity between each embedding and each anchor.
+#     sim = emb_norm @ anchors_norm.t()
+#     # Convert similarity to cosine distance.
+#     cosine_distance = 1 - sim  # lower distance means higher similarity
+#     # For each embedding, take the minimum distance (best matching anchor).
+#     min_dists, _ = torch.min(cosine_distance, dim=1)
+#     return torch.mean(min_dists)
+
 
 def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, exp=1, verbose=True):
     """
@@ -100,17 +127,3 @@ def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
     
     return anchor_selector, P_anchors_list
 
-
-class Anchor(nn.Module):
-    def __init__(self, N=100, N_anchors=2):
-        super().__init__()
-        self.P = nn.Parameter((N, N_anchors))
-
-    def forward(self, X):
-        """
-        X = [N, D]
-        P = [N_anchors, N]
-        out = [N_anchors, D]
-        """
-
-        return self.P @ X
