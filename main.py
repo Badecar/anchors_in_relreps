@@ -23,10 +23,10 @@ use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
 #NOTE: Conv_old gets best results with numbers, new with fashion
-model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
+model = AE_conv_MNIST_oldloss #VariationalAutoencoder, AEClassifier, or Autoencoder
 load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = True        # Save embeddings from current run
-dim = 110         # If load_saved: Must match an existing dim
+save_run = False        # Save embeddings from current run
+dim = 32         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64, 128) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
@@ -86,6 +86,7 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # TODO: Check the loss of this, is it converging, or do we need to fix the weights?
 # TODO: Currently we are only optimizing with euclidian. We should also implement cossim
+# TODO: Compare P with the for loop greedy anchor search
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list = get_optimized_anchors(
     emb = small_dataset_emb,
