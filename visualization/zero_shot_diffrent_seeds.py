@@ -40,7 +40,7 @@ anchor_num = 2
 nr_runs = 2            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
-num_epochs = 5
+num_epochs = 2
 lr = 1e-3
 
 # Hyperparameters for anchor selection
