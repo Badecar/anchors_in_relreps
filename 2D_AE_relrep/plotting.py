@@ -35,13 +35,13 @@ load_saved_emb = True       # Load saved embeddings from previous runs (from mod
 save_run = False        # Save embeddings from current run
 latent_dim = 2         
 anchor_num = 2
-repetitions = 5
+repetitions = 10
 nr_runs = 3
-num_epochs = 5
+num_epochs = 10
 anchor_algo = "p" # can be "random", "greedy", "p"
 
 # Hyperparameters for anchor selection
-coverage_w = 20
+coverage_w = 10
 diversity_w = 1
 exponent = 1
 
@@ -62,7 +62,7 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
             device=device,      
             latent_dim=2,
             hidden_layer=None,
-            trials=1,
+            nr_runs=1,
             save=False,
             verbose=True,
             train_loader=train_loader,
@@ -83,7 +83,7 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
 
         # finding anchors depending on the chosen method
         if anchor_algo == "random":
-            anchor_ids.append(random.sample(range(len(test_loader.dataset)), 2))
+            anchor_ids.append(random.sample(list(indices[0]), 2))
         elif anchor_algo == "p":
             anchor_selector, _ = get_optimized_anchors(
                 emb=[abs[-1]],

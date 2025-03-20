@@ -157,8 +157,10 @@ if zero_shot:
 
     # Prepare the ground truth images from the validation set (if not already available)
     all_val_images = []
+
     for x, _ in loader:
         all_val_images.append(x.to(device))
+    
     all_val_images = torch.cat(all_val_images, dim=0)
     all_val_images_flat = all_val_images.view(all_val_images.size(0), -1)
 
