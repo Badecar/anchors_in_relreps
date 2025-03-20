@@ -39,6 +39,7 @@ def coverage_loss(anchors, embeddings):
     min_dists, _ = torch.min(dists, dim=1)
     return torch.mean(min_dists)
 
+#NOTE: Cosine similarity version of losses
 # def diversity_loss(anchors, exponent=0.5):
 #     # anchors: [N_anchors, D]
 #     # Normalize anchors so that cosine similarity can be computed.

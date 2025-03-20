@@ -101,8 +101,7 @@ class AE_conv(nn.Module):
         targets = batch["image"]
         mse = F.mse_loss(predictions, targets, reduction="mean")
         log_sigma_opt = 0.5 * mse.log()
-        # r_loss = 0.5 * torch.pow((targets - predictions) / log_sigma_opt.exp(), 2) + log_sigma_opt
-        r_loss = log_sigma_opt
+        r_loss = 0.5 * torch.pow((targets - predictions) / log_sigma_opt.exp(), 2) + log_sigma_opt
 
         r_loss = r_loss.sum()
         loss = r_loss
