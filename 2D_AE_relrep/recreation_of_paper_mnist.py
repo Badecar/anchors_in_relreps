@@ -30,17 +30,17 @@ loader = val_loader
 use_small_dataset = False
 
 ### PARAMETERS ###
-model = AE_conv_MNIST #VariationalAutoencoder, AEClassifier, or Autoencoder
+model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
 head_type = 'reconstructor'    #reconstructor or classifier
 distance_measure = 'cosine'   #cosine or euclidean
 load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = True        # Save embeddings from current run
+save_run = False        # Save embeddings from current run
 dim = 2         # If load_saved: Must match an existing dim
 anchor_num = 2
 nr_runs = 2            # If load_saved: Must be <= number of saved runs for the dim
 
 # Train parameters
-num_epochs = 5
+num_epochs = 2
 lr = 1e-3
 
 # Hyperparameters for anchor selection
@@ -49,7 +49,7 @@ diversity_w = 0.08
 exponent = 1
 
 # Post-processing
-zero_shot = False
+zero_shot = True
 plot_results = True
 compute_mrr = False      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
@@ -71,14 +71,13 @@ else:
         device=device,      
         latent_dim=dim,
         hidden_layer=None, # Select none for conv models
-        trials=nr_runs,
+        nr_runs=nr_runs,
         save=save_run,
         verbose=True,
         train_loader=train_loader,
         test_loader=test_loader,
-        input_dim=28*28,
-        beta=1
-    )
+        input_dim=28*28
+        )
 
 # Getting Tets and Validation embeddings (sorted by index)
 print("Getting embeddings for test and validation set")
