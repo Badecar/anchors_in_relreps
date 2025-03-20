@@ -23,12 +23,12 @@ use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
 #NOTE: Conv_old gets best results with numbers, new with fashion
-model = AE_conv_MNIST_old #VariationalAutoencoder, AEClassifier, or Autoencoder
-load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
+model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
+load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 100         # If load_saved: Must match an existing dim
+dim = 110         # If load_saved: Must match an existing dim
 anchor_num = dim
-nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
+nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64, 128) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
 
 # Hyperparameters for anchor selection

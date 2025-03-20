@@ -10,6 +10,12 @@ class IndexedMNIST(datasets.MNIST):
         # Return image and a tuple (unique index, label)
         return image, (index, label)
 
+class IndexedFashionMNIST(datasets.FashionMNIST):
+        def __getitem__(self, index):
+            image, label = super().__getitem__(index)
+            # Return image and a tuple (unique index, label)
+            return image, (index, label)
+
 def load_mnist_data(batch_size=256, download=True, validation_split=0.1):
     """
     Loads and returns MNIST train, validation, and test DataLoaders with flattened images.
@@ -46,12 +52,6 @@ def load_mnist_data(batch_size=256, download=True, validation_split=0.1):
     
     return train_loader, test_loader, val_loader
 
-class IndexedFashionMNIST(datasets.FashionMNIST):
-        def __getitem__(self, index):
-            image, label = super().__getitem__(index)
-            # Return image and a tuple (unique index, label)
-            return image, (index, label)
-
 def load_fashion_mnist_data(batch_size=256, download=True, validation_split=0.1):
     """
     Loads and returns FashionMNIST train, validation, and test DataLoaders with flattened images.
@@ -73,8 +73,8 @@ def load_fashion_mnist_data(batch_size=256, download=True, validation_split=0.1)
     ])
     
     # Load the training and test datasets
-    train_dataset = IndexedFashionMNIST(root='../datasets', train=True, transform=transform, download=download)
-    test_dataset = IndexedFashionMNIST(root='../datasets', train=False, transform=transform, download=download)
+    train_dataset = IndexedFashionMNIST(root='../datasets/FMNIST', train=True, transform=transform, download=download)
+    test_dataset = IndexedFashionMNIST(root='../datasets/FMNIST', train=False, transform=transform, download=download)
     
     # Split the training dataset into training and validation subsets
     train_size = int((1 - validation_split) * len(train_dataset))
