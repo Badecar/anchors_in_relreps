@@ -82,54 +82,31 @@ def create_visualization_subset_indices(emb_list, idx_list, topn=200, num_pivots
     N, _ = wv.shape
 
     # 1. Select random pivot indices.
-    pivot_indices = greedy_one_at_a_time_single_euclidean(embeddings_list=emb_list, indices_list=idx_list,
-                                                          num_anchors=num_pivots, repetitions=3)
-    np.save("2D_AE_relrep/pivot_indices", pivot_indices)
-    quit()
-    pivot_indices = np.load("2D_AE_relrep/pivot_indices")
-    subset_indices = set(pivot_indices)
-    
-    # Precompute norms for cosine similarity
-    norms = np.linalg.norm(wv, axis=1)
-    
-    # 2. For each pivot, retrieve its top 'topn' neighbors (by cosine similarity)
-    for pivot_idx in pivot_indices:
-        pivot_vec = wv[pivot_idx]
-        pivot_norm = norms[pivot_idx]
-        cos_sim = np.dot(wv, pivot_vec) / (norms * pivot_norm + 1e-10)
-        sorted_indices = np.argsort(-cos_sim)
+    pivot_indices = np.load("2D_AE_relrep/pivot_indices.npy")
+    pivot_points = [wv[i] for i in pivot_indices]
+    subset_indices = []
+    labels = []
+    # 2. For each pivot, retrieve its top 'topn' neighbors
+    for i, pivot_point in enumerate(pivot_points):
+        distances = np.linalg.norm(wv - pivot_point, axis=1)
+        # Sort indices by ascending distance (closest first).
+        sorted_indices = np.argsort(distances)
         
         neighbors = []
         for idx in sorted_indices:
-            if idx == pivot_idx:
-                continue
             neighbors.append(idx)
+            labels.append(i)
             if len(neighbors) >= topn:
                 break
         
-        subset_indices.update(neighbors)
+        subset_indices.extend(neighbors)
     
-    # Convert the union set to a sorted list for deterministic order.
-    subset_indices = sorted(list(subset_indices))
     
-    # 3. Assign labels to each word in the subset.
-    # Compute the cosine similarity between each word in the subset and each pivot.
-    pivot_matrix = wv[pivot_indices, :]    # shape: (num_pivots, D)
-    pivot_norms = np.linalg.norm(pivot_matrix, axis=1)  # shape: (num_pivots,)
-    
-    subset_matrix = wv[subset_indices, :]   # shape: (M, D)
-    subset_norms = np.linalg.norm(subset_matrix, axis=1)  # shape: (M,)
-    
-    # Compute dot products: shape (M, num_pivots)
-    dot_products = np.dot(subset_matrix, pivot_matrix.T)
-    
-    # Compute cosine similarity: each [i, j] = dot_products[i,j] / (subset_norms[i]*pivot_norms[j])
-    cosine_sim = dot_products / (subset_norms[:, None] * pivot_norms[None, :] + 1e-10)
-    
-    # For each word (each row), assign the label corresponding to the pivot with maximum similarity.
-    labels = np.argmax(cosine_sim, axis=1).tolist()
-    
+    pivot_indices, subset_indices, labels = np.array(pivot_indices), np.array(subset_indices), np.array(labels)
+    print(pivot_indices.shape, subset_indices.shape, labels.shape)
     return pivot_indices, subset_indices, labels
+
+
 # For reproducibility and consistency across runs, we set a seed
 seed = 42
 set_random_seeds(seed)
@@ -165,7 +142,7 @@ diversity_w = 0.08
 exponent = 1
 
 # Post-processing
-plot_results = False
+plot_results = True
 zero_shot = False
 compute_mrr = True      # Only set true if you have >32GB of RAM, and very low dim
 compute_similarity = True
