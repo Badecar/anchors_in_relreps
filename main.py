@@ -23,7 +23,7 @@ use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
 #NOTE: Conv_old gets best results with numbers, new with fashion
-model = AE_conv_MNIST_oldloss #VariationalAutoencoder, AEClassifier, or Autoencoder
+model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
 load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = False        # Save embeddings from current run
 dim = 32         # If load_saved: Must match an existing dim
