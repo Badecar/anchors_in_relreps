@@ -19,7 +19,7 @@ class AnchorSelector(nn.Module):
         T = 0.05
         P = F.softmax(self.Q / T, dim=1)
         anchors = P @ X  # [N_anchors, D]
-        return anchors
+        return anchors, P
 
 
 def diversity_loss(anchors, exponent=0.5):
@@ -97,8 +97,6 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
         if verbose and epoch % 10 == 0:
             print(f"Epoch {epoch:3d}: loss={loss.item():.4f}, weighted coverage={loss_cov.item()*coverage_weight:.4f}, weighted diversity={loss_div.item()*diversity_weight:.4f}")
     return anchor_selector(embeddings)
-
-
 
 def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
                           coverage_weight=1.0, diversity_weight=1.0, exponent=1, verbose=True, device='cpu'):
