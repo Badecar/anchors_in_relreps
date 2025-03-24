@@ -15,6 +15,7 @@ from datasets import load_dataset
 import timm
 from timm.data import resolve_data_config, create_transform
 from tqdm import tqdm
+from utils import set_random_seeds
 from P_anchors import get_optimized_anchors, AnchorSelector
 original_forward = AnchorSelector.forward
 def patched_forward(self, X):
@@ -125,7 +126,7 @@ def evaluate_classifier(classifier, feats, labels, device):
 transformer_names = [
     "rexnet_100",
     "vit_base_patch16_224",
-    "vit_base_resnet50_384",
+    "vit_base_resnet50_384", # Takes a long time to run
     "vit_small_patch16_224"
 ]
 baseline_transformer_names = [
@@ -137,19 +138,17 @@ baseline_transformer_names = [
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    random.seed(42)
-    np.random.seed(42)
-    torch.manual_seed(42)
-
+    set_random_seeds(42)
+    
     # PARAMETERS
     train_perc = 1.0
     fine_grained = False
     target_key = "coarse_label" if not fine_grained else "fine_label"
-    num_anchors = 768
+    num_anchors = 200
     num_epochs = 5
     batch_size = 32
-    coverage_w = 0.90  # Weight for coverage
-    diversity_w = 1 - coverage_w  # Weight for diversity
+    coverage_w = 1
+    diversity_w = 1 - coverage_w
 
     print("Loading CIFAR-100 dataset...")
     train_dataset = get_dataset("train", perc=train_perc)
@@ -160,38 +159,57 @@ def main():
         num_classes = 20 if not fine_grained else 100
 
     #####################################
-    # 1. Train the anchors using vit_base_resnet50_384 only.
+    # Precompute features for all models (union of baseline and transformer names)
     #####################################
-    anchor_model_name = "vit_base_patch16_224"
-    print(f"\n----- Training anchors using {anchor_model_name} -----")
-    anchor_model = timm.create_model(anchor_model_name, pretrained=True, num_classes=0)
-    anchor_model.to(device)
-    anchor_model.eval()
-    config_anchor = resolve_data_config({}, model=anchor_model)
-    transform_anchor = create_transform(**config_anchor)
+    all_model_names = set(baseline_transformer_names + transformer_names)
+    print(all_model_names)
+    features_dict = dict()
 
-    train_loader_anchor = DataLoader(
-        train_dataset, batch_size=batch_size, shuffle=False,
-        collate_fn=lambda batch: collate_fn(batch, transform_anchor)
-    )
-    test_loader_anchor = DataLoader(
-        test_dataset, batch_size=batch_size, shuffle=False,
-        collate_fn=lambda batch: collate_fn(batch, transform_anchor)
-    )
+    for model_name in all_model_names:
+        print(f"\n=== Extracting features for model: {model_name} ===")
+        model = timm.create_model(model_name, pretrained=True, num_classes=0)
+        model.to(device)
+        model.eval()
+        config = resolve_data_config({}, model=model)
+        transform = create_transform(**config)
+        train_loader = DataLoader(
+            train_dataset, batch_size=batch_size, shuffle=False,
+            collate_fn=lambda batch: collate_fn(batch, transform)
+        )
+        test_loader = DataLoader(
+            test_dataset, batch_size=batch_size, shuffle=False,
+            collate_fn=lambda batch: collate_fn(batch, transform)
+        )
+        train_feats, train_labels = extract_features(model, train_loader, device)
+        test_feats, test_labels = extract_features(model, test_loader, device)
+        features_dict[model_name] = {
+            "train_features": train_feats,
+            "train_labels": train_labels,
+            "test_features": test_feats,
+            "test_labels": test_labels,
+        }
 
-    print("Extracting anchor training features...")
-    train_features_anchor, _ = extract_features(anchor_model, train_loader_anchor, device)
-    print("Extracting anchor test features...")
-    test_features_anchor, _ = extract_features(anchor_model, test_loader_anchor, device)
-    hidden_dim_anchor = train_features_anchor.shape[1]
-    print("Anchor feature dimension:", hidden_dim_anchor)
+    # Compute a fixed set of random anchor indices (same for all models)
+    # All models' training features have the same number of samples.
+    sample_count = features_dict[list(features_dict.keys())[0]]["train_features"].shape[0]
+    random_anchor_indices = np.sort(np.random.choice(sample_count, num_anchors, replace=False))
 
-    # Train (optimize) anchors using the anchor model's training features.
+    #####################################
+    # 1. Train the anchors using the anchor model (vit_small_patch16_224 if available) and its precomputed features.
+    #####################################
+    if "vit_small_patch16_224" in features_dict:
+        anchor_model_name = "vit_small_patch16_224"
+        print("Using vit_small_patch16_224 as the anchor model.")
+    else:
+        anchor_model_name = "rexnet_100"
+        print("Using rexnet_100 as the anchor model.")
+    print(f"\n----- Training optimized anchors using {anchor_model_name} -----")
+    anchor_train_feats = features_dict[anchor_model_name]["train_features"]
     anchor_selector, _ = get_optimized_anchors(
-        emb=[train_features_anchor.cpu().numpy()],
+        emb=[anchor_train_feats.cpu().numpy()],
         anchor_num=num_anchors,
-        epochs=50,            # Adjust as needed
-        lr=1e-1,
+        epochs=200,            # Adjust as needed
+        lr=1e-3,
         coverage_weight=coverage_w,
         diversity_weight=diversity_w,
         exponent=1,
@@ -201,90 +219,89 @@ def main():
     for param in anchor_selector.parameters():
         param.requires_grad = False
 
-    # Compute fixed anchors from the anchor model.
-    # These fixed anchors will be used for all subsequent relative projections.
-    anchors_fixed = anchor_selector(train_features_anchor.to(device))
-
     #####################################
     # 2. Loop over each baseline model.
     #####################################
     results = dict()
     for baseline_name in baseline_transformer_names:
         print(f"\n----- Baseline Transformer: {baseline_name} -----")
-        baseline_model = timm.create_model(baseline_name, pretrained=True, num_classes=0)
-        baseline_model.to(device)
-        baseline_model.eval()
-        config_base = resolve_data_config({}, model=baseline_model)
-        transform_base = create_transform(**config_base)
-        train_loader_base = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform_base)
-        )
-        test_loader_base = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform_base)
-        )
-        print("Extracting baseline training features...")
-        train_features_base, train_labels_base = extract_features(baseline_model, train_loader_base, device)
-        print("Extracting baseline test features...")
-        test_features_base, test_labels_base = extract_features(baseline_model, test_loader_base, device)
-        hidden_dim_base = train_features_base.shape[1]
-        print("Baseline feature dimension:", hidden_dim_base)
+        base_feats = features_dict[baseline_name]
+        train_features_base, train_labels_base = base_feats["train_features"], base_feats["train_labels"]
+        test_features_base, test_labels_base = base_feats["test_features"], base_feats["test_labels"]
 
-        anch = anchor_selector(train_features_base.to(device))
+        # Optimized anchors for baseline training features.
+        anch_baseline = anchor_selector(train_features_base.to(device))
+        train_rel_optimized = relative_projection(train_features_base, anch_baseline)
 
-        # IMPORTANT: Instead of computing anchors from baseline features, we use the fixed anchors.
-        train_rel = relative_projection(train_features_base, anch)
-        test_rel = relative_projection(test_features_base, anch)
+        # Random anchors using fixed indices from train_features.
+        anchors_random = train_features_base[random_anchor_indices]
+        train_rel_random = relative_projection(train_features_base, anchors_random)
 
-        # Build classifiers on the baseline model's features.
-        abs_classifier = build_classifier(input_dim=hidden_dim_base, intermediate_dim=num_anchors, num_classes=num_classes).to(device)
-        rel_classifier = build_classifier(input_dim=num_anchors, intermediate_dim=num_anchors, num_classes=num_classes).to(device)
+        # Train absolute classifier (on original features)
+        abs_classifier = build_classifier(
+            input_dim=train_features_base.shape[1],
+            intermediate_dim=num_anchors,
+            num_classes=num_classes
+        ).to(device)
         print("\nTraining baseline absolute classifier...")
-        train_classifier(abs_classifier, train_features_base, train_labels_base, test_features_base, test_labels_base, device,
-                         num_epochs=num_epochs, description="Absolute")
-        print("Training baseline relative classifier...")
-        train_classifier(rel_classifier, train_rel, train_labels_base, test_rel, test_labels_base, device,
-                         num_epochs=num_epochs, description="Relative")
+        train_classifier(
+            abs_classifier, train_features_base, train_labels_base,
+            test_features_base, test_labels_base, device,
+            num_epochs=num_epochs, description="Absolute"
+        )
+        abs_acc = evaluate_classifier(abs_classifier, test_features_base, test_labels_base, device)
 
-        results[baseline_name] = {"relative": {}}
+        # Train relative classifier with optimized anchors.
+        P_rel_classifier = build_classifier(
+            input_dim=num_anchors,
+            intermediate_dim=num_anchors,
+            num_classes=num_classes
+        ).to(device)
+        print("Training baseline optimized relative classifier...")
+        train_classifier(
+            P_rel_classifier, train_rel_optimized, train_labels_base,
+            train_rel_optimized, train_labels_base, device,
+            num_epochs=num_epochs, description="Relative_Optimized"
+        )
+
+        # Train relative classifier with random anchors.
+        rand_rel_classifier = build_classifier(
+            input_dim=num_anchors,
+            intermediate_dim=num_anchors,
+            num_classes=num_classes
+        ).to(device)
+        print("Training baseline random relative classifier...")
+        train_classifier(
+            rand_rel_classifier, train_rel_random, train_labels_base,
+            train_rel_random, train_labels_base, device,
+            num_epochs=num_epochs, description="Relative_Random"
+        )
+
+        results[baseline_name] = {"absolute": abs_acc, "optimized": {}, "random": {}}
 
         #####################################
-        # 3. For each transformer (testing), extract train features,
-        #    compute anchors using the pretrained anchor selector,
-        #    and then evaluate relative performance.
+        # 3. For each transformer, use their precomputed test features.
         #####################################
         for tname in transformer_names:
             print(f"\nEvaluating transformer: {tname}")
-            test_model = timm.create_model(tname, pretrained=True, num_classes=0)
-            test_model.to(device)
-            test_model.eval()
-            # Create the proper transform for the current transformer.
-            config_t = resolve_data_config({}, model=test_model)
-            transform_t = create_transform(**config_t)
-            
-            # Extract transformer train features.
-            train_loader_t = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform_t)
-            )
-            t_train_features, _ = extract_features(test_model, train_loader_t, device)
-            
-            # Compute anchors from the transformer train features using the pretrained anchor selector.
-            t_anchors = anchor_selector(t_train_features.to(device))
-            
-            # Extract transformer test features.
-            test_loader_t = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform_t)
-            )
-            t_test_features, _ = extract_features(test_model, test_loader_t, device)
-            
-            # Compute the relative projection using the computed anchors.
-            t_test_rel = relative_projection(t_test_features, t_anchors)
-            rel_acc = evaluate_classifier(rel_classifier, t_test_rel, test_labels_base, device)
-            print(f"Transformer {tname} | Relative Test Accuracy: {rel_acc:.2f}%")
-            results[baseline_name]["relative"][tname] = rel_acc
+            t_feats = features_dict[tname]
+            t_train_features, _ = t_feats["train_features"], t_feats["train_labels"]
+            t_test_features, t_test_labels = t_feats["test_features"], t_feats["test_labels"]
+
+            # For optimized anchors on transformer data:
+            anch_t_opt = anchor_selector(t_train_features.to(device))
+            t_test_rel_opt = relative_projection(t_test_features, anch_t_opt)
+            rel_acc_opt = evaluate_classifier(P_rel_classifier, t_test_rel_opt, t_test_labels, device)
+            print(f"Transformer {tname} | Optimized Relative Test Accuracy: {rel_acc_opt:.2f}%")
+
+            # For random anchors on transformer data (using the same random indices):
+            anchors_t_rand = t_train_features[random_anchor_indices]
+            t_test_rel_rand = relative_projection(t_test_features, anchors_t_rand)
+            rel_acc_rand = evaluate_classifier(rand_rel_classifier, t_test_rel_rand, t_test_labels, device)
+            print(f"Transformer {tname} | Random Relative Test Accuracy: {rel_acc_rand:.2f}%")
+
+            results[baseline_name]["optimized"][tname] = rel_acc_opt
+            results[baseline_name]["random"][tname] = rel_acc_rand
 
     #####################################
     # 4. Report overall results.
@@ -292,8 +309,12 @@ def main():
     print("\n----- Overall Results -----")
     for baseline_name, metrics in results.items():
         print(f"\nDecoder: {baseline_name}")
-        print("Relative classifier results:")
-        for tname, acc in metrics["relative"].items():
+        print(f"Absolute Classifier Accuracy: {metrics['absolute']:.2f}%")
+        print("Optimized Relative Classifier results:")
+        for tname, acc in metrics["optimized"].items():
+            print(f"  - {tname}: {acc:.2f}%")
+        print("Random Relative Classifier results:")
+        for tname, acc in metrics["random"].items():
             print(f"  - {tname}: {acc:.2f}%")
 
 if __name__ == "__main__":
