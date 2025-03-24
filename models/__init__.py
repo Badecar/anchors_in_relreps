@@ -3,7 +3,6 @@ from .training import *
 from .VAE import VariationalAutoencoder, VAEDecoderWrapper
 from .load_from_save import *
 from .AE_conv_MNIST import AE_conv
-from .AE_conv_MNIST_oldloss import AE_conv_MNIST_old
 from .build_encoder_decoder import build_dynamic_encoder_decoder
 
 __all__ = [
@@ -15,6 +14,5 @@ __all__ = [
     'VariationalAutoencoder',
     'VAEDecoderWrapper',
     'AE_conv',
-    'AE_conv_MNIST_oldloss',
     'build_dynamic_encoder_decoder'
     ]
