@@ -1,2 +1,3 @@
 datasets/
 material.ipynb
+features_dict_CIFAR100_coarse.pt

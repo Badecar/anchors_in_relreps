@@ -15,6 +15,7 @@ from datasets import load_dataset
 import timm
 from timm.data import resolve_data_config, create_transform
 from tqdm import tqdm
+from sklearn.metrics import f1_score
 from utils import set_random_seeds
 from P_anchors import get_optimized_anchors, AnchorSelector
 original_forward = AnchorSelector.forward
@@ -109,18 +110,18 @@ def train_classifier(classifier, train_feats, train_labels, test_feats, test_lab
             optimizer.step()
             running_loss += loss.item() * feats.size(0)
         avg_loss = running_loss / len(train_dataset)
-        acc = evaluate_classifier(classifier, test_feats, test_labels, device)
-        print(f"[{description}] Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}, Test Acc: {acc:.2f}%")
+        f1 = evaluate_classifier(classifier, test_feats, test_labels, device)
+        print(f"[{description}] Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}, Test F1: {f1:.2f}%")
 
-# Evaluate classifier accuracy.
+# Evaluate classifier using macro F1 score.
 def evaluate_classifier(classifier, feats, labels, device):
     classifier.eval()
     with torch.no_grad():
         logits = classifier(feats.to(device))
-        preds = torch.argmax(logits, dim=1).cpu()
-    correct = (preds == labels).sum().item()
-    acc = 100 * correct / labels.size(0)
-    return acc
+        preds = torch.argmax(logits, dim=1).cpu().numpy()
+    true_labels = labels.cpu().numpy()
+    f1 = f1_score(true_labels, preds, average="macro")
+    return 100 * f1
 
 # Lists of transformer model names.
 transformer_names = [
@@ -138,13 +139,13 @@ baseline_transformer_names = [
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    set_random_seeds(42)
+    set_random_seeds(43)
     
     # PARAMETERS
     train_perc = 1.0
     fine_grained = False
     target_key = "coarse_label" if not fine_grained else "fine_label"
-    num_anchors = 200
+    num_anchors = 100
     num_epochs = 5
     batch_size = 32
     coverage_w = 1
@@ -163,31 +164,39 @@ def main():
     #####################################
     all_model_names = set(baseline_transformer_names + transformer_names)
     print(all_model_names)
-    features_dict = dict()
 
-    for model_name in all_model_names:
-        print(f"\n=== Extracting features for model: {model_name} ===")
-        model = timm.create_model(model_name, pretrained=True, num_classes=0)
-        model.to(device)
-        model.eval()
-        config = resolve_data_config({}, model=model)
-        transform = create_transform(**config)
-        train_loader = DataLoader(
-            train_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform)
-        )
-        test_loader = DataLoader(
-            test_dataset, batch_size=batch_size, shuffle=False,
-            collate_fn=lambda batch: collate_fn(batch, transform)
-        )
-        train_feats, train_labels = extract_features(model, train_loader, device)
-        test_feats, test_labels = extract_features(model, test_loader, device)
-        features_dict[model_name] = {
-            "train_features": train_feats,
-            "train_labels": train_labels,
-            "test_features": test_feats,
-            "test_labels": test_labels,
-        }
+
+    features_file = os.path.join(current_path, "features_dict_CIFAR100_coarse.pt")
+    if os.path.exists(features_file):
+        features_dict = torch.load(features_file)
+        print(f"Loaded precomputed features from {features_file}")
+    else:
+        features_dict = dict()
+        for model_name in all_model_names:
+            print(f"\n=== Extracting features for model: {model_name} ===")
+            model = timm.create_model(model_name, pretrained=True, num_classes=0)
+            model.to(device)
+            model.eval()
+            config = resolve_data_config({}, model=model)
+            transform = create_transform(**config)
+            train_loader = DataLoader(
+                train_dataset, batch_size=batch_size, shuffle=False,
+                collate_fn=lambda batch: collate_fn(batch, transform)
+            )
+            test_loader = DataLoader(
+                test_dataset, batch_size=batch_size, shuffle=False,
+                collate_fn=lambda batch: collate_fn(batch, transform)
+            )
+            train_feats, train_labels = extract_features(model, train_loader, device)
+            test_feats, test_labels = extract_features(model, test_loader, device)
+            features_dict[model_name] = {
+                "train_features": train_feats,
+                "train_labels": train_labels,
+                "test_features": test_feats,
+                "test_labels": test_labels,
+            }
+        torch.save(features_dict, features_file)
+        print(f"Saved precomputed features to {features_file}")
 
     # Compute a fixed set of random anchor indices (same for all models)
     # All models' training features have the same number of samples.
@@ -197,12 +206,12 @@ def main():
     #####################################
     # 1. Train the anchors using the anchor model (vit_small_patch16_224 if available) and its precomputed features.
     #####################################
-    if "vit_small_patch16_224" in features_dict:
-        anchor_model_name = "vit_small_patch16_224"
-        print("Using vit_small_patch16_224 as the anchor model.")
+    anchor_encoder = 'rexnet_100'
+    if anchor_encoder in features_dict:
+        anchor_model_name = anchor_encoder
     else:
-        anchor_model_name = "rexnet_100"
-        print("Using rexnet_100 as the anchor model.")
+        anchor_model_name = features_dict.keys()[0]
+        
     print(f"\n----- Training optimized anchors using {anchor_model_name} -----")
     anchor_train_feats = features_dict[anchor_model_name]["train_features"]
     anchor_selector, _ = get_optimized_anchors(
@@ -249,7 +258,7 @@ def main():
             test_features_base, test_labels_base, device,
             num_epochs=num_epochs, description="Absolute"
         )
-        abs_acc = evaluate_classifier(abs_classifier, test_features_base, test_labels_base, device)
+        abs_f1 = evaluate_classifier(abs_classifier, test_features_base, test_labels_base, device)
 
         # Train relative classifier with optimized anchors.
         P_rel_classifier = build_classifier(
@@ -277,7 +286,7 @@ def main():
             num_epochs=num_epochs, description="Relative_Random"
         )
 
-        results[baseline_name] = {"absolute": abs_acc, "optimized": {}, "random": {}}
+        results[baseline_name] = {"absolute": abs_f1, "optimized": {}, "random": {}}
 
         #####################################
         # 3. For each transformer, use their precomputed test features.
@@ -291,31 +300,42 @@ def main():
             # For optimized anchors on transformer data:
             anch_t_opt = anchor_selector(t_train_features.to(device))
             t_test_rel_opt = relative_projection(t_test_features, anch_t_opt)
-            rel_acc_opt = evaluate_classifier(P_rel_classifier, t_test_rel_opt, t_test_labels, device)
-            print(f"Transformer {tname} | Optimized Relative Test Accuracy: {rel_acc_opt:.2f}%")
+            rel_f1_opt = evaluate_classifier(P_rel_classifier, t_test_rel_opt, t_test_labels, device)
+            print(f"Transformer {tname} | Optimized Relative Test F1: {rel_f1_opt:.2f}%")
 
             # For random anchors on transformer data (using the same random indices):
             anchors_t_rand = t_train_features[random_anchor_indices]
             t_test_rel_rand = relative_projection(t_test_features, anchors_t_rand)
-            rel_acc_rand = evaluate_classifier(rand_rel_classifier, t_test_rel_rand, t_test_labels, device)
-            print(f"Transformer {tname} | Random Relative Test Accuracy: {rel_acc_rand:.2f}%")
+            rel_f1_rand = evaluate_classifier(rand_rel_classifier, t_test_rel_rand, t_test_labels, device)
+            print(f"Transformer {tname} | Random Relative Test F1: {rel_f1_rand:.2f}%")
 
-            results[baseline_name]["optimized"][tname] = rel_acc_opt
-            results[baseline_name]["random"][tname] = rel_acc_rand
+            results[baseline_name]["optimized"][tname] = rel_f1_opt
+            results[baseline_name]["random"][tname] = rel_f1_rand
 
     #####################################
     # 4. Report overall results.
     #####################################
+    print("\n----- Optimized Results Across Baselines and Transformers -----")
+    for baseline, metrics in results.items():
+        print(f"\nBaseline Transformer: {baseline}")
+        for transformer, f1 in metrics["optimized"].items():
+            print(f"Transformer {transformer} | Optimized Relative Test F1: {f1:.2f}%")
+
     print("\n----- Overall Results -----")
+    print(f"Anchors trained on {anchor_encoder} with {num_anchors} anchors.")
     for baseline_name, metrics in results.items():
-        print(f"\nDecoder: {baseline_name}")
-        print(f"Absolute Classifier Accuracy: {metrics['absolute']:.2f}%")
-        print("Optimized Relative Classifier results:")
-        for tname, acc in metrics["optimized"].items():
-            print(f"  - {tname}: {acc:.2f}%")
-        print("Random Relative Classifier results:")
-        for tname, acc in metrics["random"].items():
-            print(f"  - {tname}: {acc:.2f}%")
+        print(f"\nDecoder: {baseline_name}  |  Abs. Classifier F1: {metrics['absolute']:.2f}%")
+        header = f"| {'Encoder':<25} | {'Greedy, F1 (%)':^20} | {'Random, F1 (%)':^20} |"
+        line = "+" + "-"*27 + "+" + "-"*22 + "+" + "-"*22 + "+"
+        print(line)
+        print(header)
+        print(line)
+        for tname in transformer_names:
+            opt_f1 = metrics["optimized"].get(tname, 0.0)
+            rand_f1 = metrics["random"].get(tname, 0.0)
+            print(f"| {tname:<25} | {opt_f1:^20.2f} | {rand_f1:^20.2f} |")
+        print(line)
+
 
 if __name__ == "__main__":
     main()
