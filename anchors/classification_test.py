@@ -127,13 +127,13 @@ def evaluate_classifier(classifier, feats, labels, device):
 transformer_names = [
     "rexnet_100",
     "vit_base_patch16_224",
-    "vit_base_resnet50_384", # Takes a long time to run
+    # "vit_base_resnet50_384", # Takes a long time to run
     "vit_small_patch16_224"
 ]
 baseline_transformer_names = [
     "rexnet_100",
     "vit_base_patch16_224",
-    "vit_base_resnet50_384",
+    # "vit_base_resnet50_384",
     "vit_small_patch16_224"
 ]
 
@@ -145,11 +145,12 @@ def main():
     train_perc = 1.0
     fine_grained = False
     target_key = "coarse_label" if not fine_grained else "fine_label"
-    num_anchors = 100
+    num_anchors = 768
     num_epochs = 5
     batch_size = 32
-    coverage_w = 1
+    coverage_w = 0.1
     diversity_w = 1 - coverage_w
+    anti_collapse_w = 1.0
 
     print("Loading CIFAR-100 dataset...")
     train_dataset = get_dataset("train", perc=train_perc)
@@ -217,16 +218,19 @@ def main():
     anchor_selector, _ = get_optimized_anchors(
         emb=[anchor_train_feats.cpu().numpy()],
         anchor_num=num_anchors,
-        epochs=200,            # Adjust as needed
+        epochs=200,            
         lr=1e-3,
         coverage_weight=coverage_w,
         diversity_weight=diversity_w,
+        anti_collapse_w=anti_collapse_w,
         exponent=1,
         verbose=True,
         device=device
     )
     for param in anchor_selector.parameters():
         param.requires_grad = False
+
+
 
     #####################################
     # 2. Loop over each baseline model.
@@ -245,6 +249,22 @@ def main():
         # Random anchors using fixed indices from train_features.
         anchors_random = train_features_base[random_anchor_indices]
         train_rel_random = relative_projection(train_features_base, anchors_random)
+
+        # Select 20 random anchors from anch_baseline and print their length.
+        random_indices = np.random.choice(anch_baseline.shape[0], 20, replace=False)
+        random_anchors = anch_baseline[random_indices]
+        print("Length of 20 random anchors:", len(random_anchors))
+
+        # Select 20 random anchors from anch_baseline and print their length.
+        random_indices = np.random.choice(anch_baseline.shape[0], 20, replace=False)
+        random_anchors = anch_baseline[random_indices]
+        print("Length of 20 random anchors:", len(random_anchors))
+
+        # Print the rank of the optimized anchors matrix.
+        print("Rank of optimized anchors matrix:", torch.linalg.matrix_rank(anch_baseline).item())
+
+        # Print the rank of the random anchors matrix.
+        print("Rank of random anchors matrix:", torch.linalg.matrix_rank(anchors_random).item())
 
         # Train absolute classifier (on original features)
         abs_classifier = build_classifier(
