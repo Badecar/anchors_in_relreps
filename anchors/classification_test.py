@@ -130,7 +130,7 @@ transformer_names = [
     # "vit_base_resnet50_384", # Takes a long time to run
     "vit_small_patch16_224"
 ]
-baseline_transformer_names = [
+decoder_transformer_names = [
     "rexnet_100",
     "vit_base_patch16_224",
     # "vit_base_resnet50_384",
@@ -163,7 +163,7 @@ def main():
     #####################################
     # Precompute features for all models (union of baseline and transformer names)
     #####################################
-    all_model_names = set(baseline_transformer_names + transformer_names)
+    all_model_names = set(decoder_transformer_names + transformer_names)
     print(all_model_names)
 
 
@@ -236,7 +236,7 @@ def main():
     # 2. Loop over each baseline model.
     #####################################
     results = dict()
-    for baseline_name in baseline_transformer_names:
+    for baseline_name in decoder_transformer_names:
         print(f"\n----- Baseline Transformer: {baseline_name} -----")
         base_feats = features_dict[baseline_name]
         train_features_base, train_labels_base = base_feats["train_features"], base_feats["train_labels"]
