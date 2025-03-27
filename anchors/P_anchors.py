@@ -110,7 +110,8 @@ def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
       anchor_selector: the trained AnchorSelector.
       P_anchors_list: list of anchors for each run.
     """
-    print("Optimizing P anchors...")
+    if verbose:
+      print("Optimizing P anchors...")
     # Optimize on the first run's embeddings
     X_first = emb[0]
     X_first_tensor = torch.from_numpy(X_first).to(device)

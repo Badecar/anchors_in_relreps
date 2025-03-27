@@ -1,6 +1,6 @@
 import numpy as np
 
-def get_embeddings(loader, model_list, device):
+def get_embeddings(loader, model_list, device, verbose=True):
     """
     Compute latent embeddings, indices, and labels for each model in the model_list using the provided data loader.
     Args:
@@ -13,7 +13,8 @@ def get_embeddings(loader, model_list, device):
             - idx_list (list): A list of numpy arrays containing the indices corresponding to the embeddings for each model.
             - labels_list (list): A list of numpy arrays with the labels corresponding to the data from each model.
     """
-    print("Getting embeddings for test and chosen loader set")
+    if verbose:
+        print("Getting embeddings for test and chosen loader set")
     emb_list = []
     idx_list = []
     labels_list = []

@@ -2,7 +2,6 @@ import os
 import numpy as np
 import torch
 from .autoencoder_noconv import Autoencoder, AEClassifier
-from .AE_conv_MNIST_oldloss import AE_conv_MNIST_old
 from .VAE import VariationalAutoencoder
 from .AE_conv_MNIST import AE_conv
 

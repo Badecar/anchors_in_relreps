@@ -26,7 +26,8 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
         embeddings (Tensor): Latent embeddings from the test (or train) set.
         anchors (Tensor): (Optional) set of anchor embeddings if you implement that step here.
     """
-    print("Training AE models")
+    if verbose:
+        print("Training AE models")
     embeddings_list = []
     indices_list = []
     labels_list = []
