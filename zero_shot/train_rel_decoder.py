@@ -81,6 +81,7 @@ def train_rel_decoder(epochs, hidden_dims, rel_model, model_list, relrep_list, i
         verbose=verbose
     )
 
+    #NOTE: We do zero-shot here
     if show:
         sample_indices = random.sample(range(len(loader.dataset)), 16)
         sample_indices = list(range(20, 37))

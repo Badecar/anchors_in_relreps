@@ -22,7 +22,7 @@ class AnchorSelector(nn.Module):
         anchors = P @ X  # [N_anchors, D]
         return anchors, P
 
-
+# NOTE: Eucl
 # def diversity_loss(anchors, exponent=0.5, scale=1.0/np.sqrt(2)):
 #     # anchors: [N_anchors, D]
 #     # Compute pairwise distances (for example, cosine or Euclidean)
@@ -49,7 +49,6 @@ def diversity_loss(anchors, exponent=0.5):
     cosine_sim_values = abs(sim_matrix[idx[0], idx[1]])
     return -torch.mean(cosine_sim_values ** exponent)
 
-
 def coverage_loss(anchors, embeddings):
     # For each embedding, compute its distance to each anchor and take the minimum.
     anchors_norm = F.normalize(anchors, p=2, dim=1)
@@ -60,7 +59,7 @@ def coverage_loss(anchors, embeddings):
 
 def anti_collapse_loss(anchors):
     # return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
-    return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
+    return torch.mean(torch.relu(1 - torch.norm(anchors, dim=1)))
 
 
 def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, verbose=True):
