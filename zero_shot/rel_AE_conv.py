@@ -85,7 +85,7 @@ class rel_AE_conv_MNIST(nn.Module):
         # Flatten the reconstructed image
         x_rec = x_rec.view(x_rec.size(0), -1)
         return x_rec
-    
+
     def _decode(self, relative_embedding): # For fc decoder
         """
         Decodes relative representations into flattened MNIST images.

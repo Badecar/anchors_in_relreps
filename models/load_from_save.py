@@ -12,7 +12,7 @@ def get_save_dir(model, latent_dim, data="FMNIST"):
             m = 'AE'
     elif model == VariationalAutoencoder:
             m = 'VAE'
-    elif model == AE_conv or AE_conv_MNIST_old:
+    elif model == AE_conv:
             m = 'AE_conv_MNIST'
     save_dir_emb = os.path.join("experiments", data,"saved_embeddings", m, f"dim{latent_dim}")
     save_dir_AE = os.path.join("experiments", data,"saved_models", m, f"dim{latent_dim}")
