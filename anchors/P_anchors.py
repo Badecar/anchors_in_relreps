@@ -3,6 +3,19 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 
+def compute_covariance_matrix(embeddings):
+    """
+    Computes the sample covariance matrix for embeddings.
+    
+    embeddings: Tensor of shape [N, D]
+    
+    Returns: Tensor of shape [D, D]
+    """
+    mean = embeddings.mean(dim=0, keepdim=True)
+    centered = embeddings - mean
+    cov = (centered.t() @ centered) / (embeddings.size(0) - 1)
+    return cov
+
 class AnchorSelector(nn.Module):
     def __init__(self, N, N_anchors):
         super().__init__()
@@ -16,53 +29,142 @@ class AnchorSelector(nn.Module):
           anchors: [N_anchors, D] computed as weighted combinations of X.
         """
         # Enforce each row to sum to 1 (soft assignment)
-        # You can control the temperature in softmax for sharper assignment.
-        T = 0.05
+        # You can control the temperature in softmax for sharper assignment
+        # Higher temperature -> softer assignment
+        T = 0.2
         P = F.softmax(self.Q / T, dim=1)
         anchors = P @ X  # [N_anchors, D]
-        return anchors, P
+        return anchors
+
+
+# class AnchorSelector(nn.Module):
+#   def __init__(self, N, N_anchors):
+#     super().__init__()
+#     # Raw parameters for anchors
+#     self.P = nn.Parameter(torch.randn(N_anchors, N))
+  
+#   def forward(self, X):
+#     """
+#     X: [N, D] embeddings.
+#     Returns:
+#       anchors: [N_anchors, D] computed as weighted combinations of X.
+#     """
+#     anchors = self.P @ X
+#     return anchors
 
 # NOTE: Eucl
-# def diversity_loss(anchors, exponent=0.5, scale=1.0/np.sqrt(2)):
-#     # anchors: [N_anchors, D]
-#     # Compute pairwise distances (for example, cosine or Euclidean)
-#     pdist_vals = torch.pdist(anchors, p=2)  # example with Euclidean
-#     scaled_pdist_vals = pdist_vals * scale # scale to get on the same order of magnitude as cosine similarity
-#     return -torch.mean(scaled_pdist_vals ** exponent)  # negative so maximizing diversity
+def diversity_loss_eucl(anchors, exponent=1.0, scale=1.0/np.sqrt(2)):
+    pdist_vals = torch.pdist(anchors, p=2)
+    # scaled_pdist_vals = pdist_vals * scale # Only needed if we want to mix cossim and eucl
+    return -torch.mean(pdist_vals ** exponent)  # negative so maximizing diversity
 
-# def coverage_loss(anchors, embeddings, scale=1.0/np.sqrt(2)):
-#     # embeddings: [N, D] and anchors: [N_anchors, D]
-#     # For each embedding, compute its distance to each anchor and take the minimum.
-#     # Then, average over all embeddings.
-#     # (Here we use squared Euclidean distance)
-#     dists = torch.cdist(embeddings, anchors, p=2)  # [N, N_anchors]
-#     scaled_dist = dists * scale 
-#     min_dists, _ = torch.min(dists, dim=1)
-#     return torch.mean(min_dists)
+def coverage_loss_eucl(anchors, embeddings, scale=1.0/np.sqrt(2)):
+    # (Here we use squared Euclidean distance)
+    dists = torch.cdist(embeddings, anchors, p=2)  # [N, N_anchors]
+    # scaled_dist = dists * scale # Only needed if we want to mix cossim and eucl
+    min_dists, _ = torch.min(dists, dim=1)
+    return torch.mean(min_dists)
 
 #NOTE: Cosine similarity version of losses
-def diversity_loss(anchors, exponent=0.5):
+def diversity_loss_cossim(anchors, exponent=1.0):
     # Compute pairwise distances (for example, cosine or Euclidean)
     anchors_norm = F.normalize(anchors, p=2, dim=1)
     sim_matrix = anchors_norm @ anchors_norm.t()
     idx = torch.triu_indices(sim_matrix.size(0), sim_matrix.size(1), offset=1)
     cosine_sim_values = abs(sim_matrix[idx[0], idx[1]])
-    return -torch.mean(cosine_sim_values ** exponent)
+    return torch.mean(cosine_sim_values ** exponent)
 
-def coverage_loss(anchors, embeddings):
+def coverage_loss_cossim(anchors, embeddings):
     # For each embedding, compute its distance to each anchor and take the minimum.
     anchors_norm = F.normalize(anchors, p=2, dim=1)
     emb_norm = F.normalize(embeddings, p=2, dim=1)
     sim = abs(emb_norm @ anchors_norm.t())
     min_dists, _ = torch.min(sim, dim=1)
-    return torch.mean(min_dists)
+    return -torch.mean(min_dists)
+
+
+#NOTE: Using Mahalanobis distance.
+def coverage_loss_mahalanobis(anchors, embeddings, inv_cov):
+    """
+    For each embedding, compute its Mahalanobis distance to each anchor and take the minimum.
+    Returns the negative mean of these minimum distances.
+    
+    anchors: [N_anchors, D]
+    embeddings: [N, D]
+    inv_cov: [D, D] inverse covariance matrix.
+    """
+    # Compute differences: shape [N, N_anchors, D]
+    diff = embeddings.unsqueeze(1) - anchors.unsqueeze(0)
+    # Compute Mahalanobis distances: d_i,j = sqrt((x_i - a_j)^T * inv_cov * (x_i - a_j))
+    dists = torch.sqrt(torch.einsum("nid,ij,njd->ni", diff, inv_cov, diff) + 1e-8)
+    min_dists, _ = torch.min(dists, dim=1)
+    return -torch.mean(min_dists)
+
+def diversity_loss_mahalanobis(anchors, inv_cov, exponent=1.0):
+    """
+    Computes the average pairwise Mahalanobis distance (raised to the given exponent)
+    between anchors as a measure of diversity.
+    
+    anchors: [N_anchors, D]
+    inv_cov: [D, D] inverse covariance matrix.
+    """
+    n = anchors.size(0)
+    dists = []
+    for i in range(n):
+        for j in range(i+1, n):
+            diff = anchors[i] - anchors[j]
+            # Mahalanobis distance: sqrt(diff^T * inv_cov * diff)
+            dist = torch.sqrt((diff.unsqueeze(0) @ inv_cov @ diff.unsqueeze(1)).squeeze() + 1e-8)
+            dists.append(dist)
+    if len(dists) == 0:
+        return torch.tensor(0.0, device=anchors.device)
+    dists = torch.stack(dists)
+    return torch.mean(dists ** exponent)
+
+# Batched version for Mahalanobis coverage loss.
+def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=1024):
+    total_loss = 0.0
+    total_samples = 0
+    for i in range(0, embeddings.size(0), batch_size):
+        emb_batch = embeddings[i:i+batch_size]                         # shape: (B, D)
+        diff = emb_batch.unsqueeze(1) - anchors.unsqueeze(0)             # (B, N_anchors, D)
+        # print(f"got through the {i}th diff")
+        # Using the same einsum string as in the test function:
+        dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8)
+        min_dists, _ = torch.min(dists, dim=1)
+        total_loss += torch.sum(min_dists)
+        total_samples += emb_batch.size(0)
+    return -total_loss / total_samples
+
+# Batched version for Mahalanobis diversity loss.
+def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_size=256):
+    n = anchors.size(0)
+    total_loss = 0.0
+    count = 0
+    for i in range(0, n, batch_size):
+        end_i = min(i+batch_size, n)
+        for j in range(i+1, n, batch_size):
+            end_j = min(j+batch_size, n)
+            a_batch = anchors[i:end_i]   # shape: (B1, D)
+            b_batch = anchors[j:end_j]   # shape: (B2, D)
+            diff = a_batch.unsqueeze(1) - b_batch.unsqueeze(0)  # (B1, B2, D)
+            dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8)
+            total_loss += torch.sum(dists ** exponent)
+            count += dists.numel()
+    if count == 0:
+        return torch.tensor(0.0, device=anchors.device)
+    return total_loss / count
+
 
 def anti_collapse_loss(anchors):
     # return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
-    return torch.mean(torch.relu(1 - torch.norm(anchors, dim=1)))
+    return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
+
+def anchor_size_loss(anchors):
+   return torch.mean(torch.norm(anchors, dim=1))
 
 
-def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, verbose=True):
+def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, dist_measure="cosine", verbose=True, device='cpu'):
     """
     Optimize the Q parameters in AnchorSelector so that anchors = softmax(Q) @ embeddings
     minimize a combined loss of coverage and diversity.
@@ -82,18 +184,31 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
     optimizer = torch.optim.Adam(anchor_selector.parameters(), lr=lr)
     for epoch in range(epochs):
         anchors = anchor_selector(embeddings)
-        loss_cov = coverage_loss(anchors, embeddings)
-        loss_div = diversity_loss(anchors, exponent=exp)
-        loss = diversity_weight * loss_div + coverage_weight * loss_cov + anti_collapse_w * anti_collapse_loss(anchors)
+        if dist_measure == "euclidian":
+            loss_cov = coverage_loss_eucl(anchors, embeddings)
+            loss_div = diversity_loss_eucl(anchors, exponent=exp)
+            anti_collapse_w = 0.0  # No anti-collapse loss needed for euclidean
+        elif dist_measure == "cosine":  
+            loss_cov = coverage_loss_cossim(anchors, embeddings)
+            loss_div = diversity_loss_cossim(anchors, exponent=exp)
+            anti_collapse_w = 0.0  # No anti-collapse loss needed for euclidean
+        elif dist_measure == "mahalanobis":
+            inv_cov = torch.linalg.inv(compute_covariance_matrix(embeddings) + 1e-6 * torch.eye(embeddings.size(1), device=embeddings.device))
+            loss_cov = coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov)
+            loss_div = diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=exp)
+        else:
+            raise ValueError(f"dist_measure must be one of 'euclidian', 'cosine', or 'mahalanobis' but was {dist_measure}.")
+        loss = diversity_weight * loss_div + coverage_weight * loss_cov - anti_collapse_w * anchor_size_loss(anchors)
+
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         if verbose and epoch % 10 == 0:
-            print(f"Epoch {epoch:3d}: loss={loss.item():.7f}, weighted coverage={loss_cov.item()*coverage_weight:.7f}, weighted diversity={loss_div.item()*diversity_weight:.4f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
+            print(f"Epoch {epoch:3d}: loss={loss.item():.7f}, weighted coverage={loss_cov.item()*coverage_weight:.7f}, weighted diversity={loss_div.item()*diversity_weight:.7f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
     return anchor_selector(embeddings)
 
 def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
-                          coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1, verbose=True, device='cpu'):
+                          coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1, dist_measure="cosine", verbose=True, device='cpu'):
     """
     For a list of embeddings (numpy arrays), optimize anchors on the first run's embeddings
     and then compute the corresponding anchors for every run.
@@ -109,7 +224,7 @@ def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
     anchor_selector = AnchorSelector(N=X_first_tensor.shape[0], N_anchors=anchor_num).to(device)
     optimize_anchors(anchor_selector, X_first_tensor, epochs=epochs, lr=lr,
                      coverage_weight=coverage_weight, diversity_weight=diversity_weight, anti_collapse_w=anti_collapse_w,
-                     exp=exponent, verbose=verbose)
+                     exp=exponent, dist_measure=dist_measure, verbose=verbose, device=device)
     
     # Compute anchors for each run using the optimized anchor_selector
     P_anchors_list = []

@@ -8,9 +8,9 @@ from visualization import *
 from anchors import *
 from relreps import *
 from zero_shot import *
+import math
 
-# For reproducibility and consistency across runs, we set a seed
-set_random_seeds(43)
+set_random_seeds(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
@@ -22,23 +22,24 @@ loader = val_loader
 use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
-model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
-load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = False        # Save embeddings from current run
-dim = 32         # If load_saved: Must match an existing dim
+model = Autoencoder #VariationalAutoencoder, AEClassifier, or Autoencoder
+load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
+save_run = True        # Save embeddings from current run
+dim = 10         # If load_saved: Must match an existing dim
 anchor_num = dim
 nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
-hidden_layer = (32, 64, 128) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
+hidden_layer = 128 # (32, 64, 128)
 
 # Hyperparameters for anchor selection
-coverage_w = 0.90 # Coverage of embeddings
+coverage_w = 0.0 # Coverage of embeddings
 diversity_w = 1 - coverage_w # Pairwise between anchors
+anti_collapse_w = 0
 exponent = 1
 
 # Post-processing
-zero_shot = True
+zero_shot = False
 plot_embeddings = True
-compute_mrr = True      # Only set true if you have >32GB of RAM, and very low dim
+compute_mrr = False      # Only set true if you have >32GB of RAM
 compute_similarity = True
 ### ###
 
@@ -88,22 +89,47 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 # TODO: Compare P with the for loop greedy anchor search
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list = get_optimized_anchors(
-    emb = small_dataset_emb,
+    emb = emb_list,
     anchor_num=anchor_num,
     epochs=200,
-    lr=1e-1,
+    lr=1e-3,
     coverage_weight=coverage_w,
     diversity_weight=diversity_w,
+    anti_collapse_w=anti_collapse_w,
     exponent=exponent,
+    dist_measure="mahalanobis", ## "euclidian", "mahalanobis"
     verbose=True,
     device=device,
 )
-anch_list = rand_anchors_list
+anch_list = P_anchors_list
+
+# print("Pairwise cosine angles between all anchors:")
+# anch_for_angl = anch_list[0]
+# n_anchors = len(anch_for_angl)
+# for i in range(n_anchors):
+#     for j in range(i+1, n_anchors):
+#         anchor1 = anch_for_angl[i]
+#         anchor2 = anch_for_angl[j]
+#         dot_product = np.dot(anchor1, anchor2)
+#         norm1 = np.linalg.norm(anchor1)
+#         norm2 = np.linalg.norm(anchor2)
+#         cos_angle = dot_product / (norm1 * norm2)
+#         cos_angle = np.clip(cos_angle, -1.0, 1.0)
+#         angle_deg = math.degrees(math.acos(cos_angle))
+#         print(f"Anchors {i} and {j}: {angle_deg:.2f}°")
+
+
+# # Print the Euclidean length of each anchor from the first run of optimized anchors
+# print("\nEuclidean lengths of all anchors:")
+# for i, anchor in enumerate(anch_list[0]):
+#     length = np.linalg.norm(anchor)
+#     print(f"Anchor {i}: {length:.4f}")
+
+# anchor_matrix = np.array(anch_list[0])
+# print("Rank of the anchor matrix:", np.linalg.matrix_rank(anchor_matrix))
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
-
-# visualize_reconstruction_by_id(idx_list[0][1], model_list[0], loader, device)
+relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)
 
 ### ZERO-SHOT STITCHING ###
 # NOTE: Decoder seems to work fine, but the relreps are hindering the performance
@@ -138,4 +164,4 @@ if plot_embeddings:
 #   The eucl relreps are only in the first quadrant, so cosine sim will be higher
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, verbose=False)
+    compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, verbose=False)

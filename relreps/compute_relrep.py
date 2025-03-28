@@ -45,6 +45,51 @@ def compute_relative_coordinates_euclidean(embeddings_list, anchors_list, flatte
     return relative_reps_outer
 
 
+def compute_relative_coordinates_mahalanobis(embeddings_list, anchors_list, inv_cov=None, epsilon=1e-6):
+    """
+    Computes the relative representation based on the Mahalanobis distance.
+    
+    For each pair of embeddings (shape [N, latent_dim]) and anchors (shape [A, latent_dim])
+    in the provided lists, computes the pairwise Mahalanobis distances:
+  
+        d(x, a) = sqrt((x-a)^T * inv_cov * (x-a))
+  
+    If inv_cov is not provided, it is computed from the embeddings using the sample covariance.
+
+    Args:
+        embeddings_list (list of np.array): List of embeddings arrays, each with shape [N, d].
+        anchors_list (list of np.array): List of anchor arrays, each with shape [A, d].
+        inv_cov (np.array, optional): Precomputed inverse covariance matrix of shape [d, d]. 
+            If None, it is computed per run.
+        epsilon (float, optional): Small constant for numerical stability when inverting.
+
+    Returns:
+        List of np.array: Each array has shape [N, A] containing the negative Mahalanobis distances.
+                          (Negative distances so that closer points have higher similarity.)
+    """
+    relative_reps_outer = []
+    for embeddings, anchors in zip(embeddings_list, anchors_list):
+        # If inv_cov not provided, compute it from the embeddings.
+        if inv_cov is None:
+            # np.cov expects variables in rows so set rowvar=False for data in columns.
+            cov = np.cov(embeddings, rowvar=False)
+            inv_cov_run = np.linalg.inv(cov + epsilon * np.eye(cov.shape[0]))
+        else:
+            inv_cov_run = inv_cov
+
+        # Compute pairwise differences: shape [N, A, d]
+        diff = embeddings[:, None, :] - anchors[None, :, :]
+        # Compute squared Mahalanobis distances: for each [n, a]:
+        # sum_{d,c} diff[n,a,d] * inv_cov_run[d,c] * diff[n,a,c]
+        sq_dists = np.einsum("nad,dc,nac->na", diff, inv_cov_run, diff)
+        # Add a small constant for numerical stability and take square root.
+        dists = np.sqrt(sq_dists + 1e-8)
+        # Return negative distances so that a smaller distance gives a higher similarity.
+        rel_rep = -dists
+        relative_reps_outer.append(rel_rep)
+    return relative_reps_outer
+
+
 def encode_relative_by_index(index, embeddings, anchors, flatten=False):
     """
     Computes the relative representation for a given data point index.

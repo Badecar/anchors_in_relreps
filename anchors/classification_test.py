@@ -123,36 +123,47 @@ def evaluate_classifier(classifier, feats, labels, device):
     f1 = f1_score(true_labels, preds, average="macro")
     return 100 * f1
 
+def compute_orthogonality(anchors):
+    # Normalize anchors to unit length.
+    anchors_norm = F.normalize(anchors, p=2, dim=1)
+    sim_matrix = anchors_norm @ anchors_norm.t()  # cosine similarity matrix
+    num = anchors.size(0)
+    # Subtract identity so that diagonal elements (self-similarity) become 0.
+    off_diag = sim_matrix - torch.eye(num, device=anchors.device)
+    # Return the average absolute off-diagonal similarity.
+    return off_diag.abs().mean()
+
 # Lists of transformer model names.
 transformer_names = [
-    "rexnet_100",
     "vit_base_patch16_224",
+    "rexnet_100",
     # "vit_base_resnet50_384", # Takes a long time to run
     "vit_small_patch16_224"
 ]
 decoder_transformer_names = [
-    "rexnet_100",
     "vit_base_patch16_224",
+    "rexnet_100",
     # "vit_base_resnet50_384",
     "vit_small_patch16_224"
 ]
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    set_random_seeds(43)
+    set_random_seeds(41)
     
     # PARAMETERS
     train_perc = 1.0
     fine_grained = False
     target_key = "coarse_label" if not fine_grained else "fine_label"
-    num_anchors = 768
+    num_anchors = 2
     num_epochs = 5
     batch_size = 32
-    coverage_w = 0.1
+    coverage_w = 0
     diversity_w = 1 - coverage_w
-    anti_collapse_w = 1.0
+    anti_collapse_w = 0
+    anchor_encoder = 'vit_base_patch16_224' # Encoder used to train the greedy anchors
 
-    print("Loading CIFAR-100 dataset...")
+    print("Loading the CIFAR-100 dataset...")
     train_dataset = get_dataset("train", perc=train_perc)
     test_dataset = get_dataset("test", perc=train_perc)
     if hasattr(train_dataset.features[target_key], "num_classes"):
@@ -207,7 +218,6 @@ def main():
     #####################################
     # 1. Train the anchors using the anchor model (vit_small_patch16_224 if available) and its precomputed features.
     #####################################
-    anchor_encoder = 'rexnet_100'
     if anchor_encoder in features_dict:
         anchor_model_name = anchor_encoder
     else:
@@ -219,7 +229,7 @@ def main():
         emb=[anchor_train_feats.cpu().numpy()],
         anchor_num=num_anchors,
         epochs=200,            
-        lr=1e-3,
+        lr=1e-2,
         coverage_weight=coverage_w,
         diversity_weight=diversity_w,
         anti_collapse_w=anti_collapse_w,
@@ -229,8 +239,6 @@ def main():
     )
     for param in anchor_selector.parameters():
         param.requires_grad = False
-
-
 
     #####################################
     # 2. Loop over each baseline model.
@@ -249,22 +257,47 @@ def main():
         # Random anchors using fixed indices from train_features.
         anchors_random = train_features_base[random_anchor_indices]
         train_rel_random = relative_projection(train_features_base, anchors_random)
+        
+        # import math
+        # print("Pairwise cosine angles between all anchors:")
+        # anch_for_angl = anch_baseline
+        # n_anchors = len(anch_for_angl)
+        # for i in range(n_anchors):
+        #     for j in range(i+1, n_anchors):
+        #         anchor1 = anch_for_angl[i]
+        #         anchor2 = anch_for_angl[j]
+        #         dot_product = np.dot(anchor1, anchor2)
+        #         norm1 = np.linalg.norm(anchor1)
+        #         norm2 = np.linalg.norm(anchor2)
+        #         cos_angle = dot_product / (norm1 * norm2)
+        #         cos_angle = np.clip(cos_angle, -1.0, 1.0)
+        #         angle_deg = math.degrees(math.acos(cos_angle))
+        #         print(f"Anchors {i} and {j}: {angle_deg:.2f}°")
 
-        # Select 20 random anchors from anch_baseline and print their length.
-        random_indices = np.random.choice(anch_baseline.shape[0], 20, replace=False)
-        random_anchors = anch_baseline[random_indices]
-        print("Length of 20 random anchors:", len(random_anchors))
-
-        # Select 20 random anchors from anch_baseline and print their length.
-        random_indices = np.random.choice(anch_baseline.shape[0], 20, replace=False)
-        random_anchors = anch_baseline[random_indices]
-        print("Length of 20 random anchors:", len(random_anchors))
 
         # Print the rank of the optimized anchors matrix.
         print("Rank of optimized anchors matrix:", torch.linalg.matrix_rank(anch_baseline).item())
 
         # Print the rank of the random anchors matrix.
         print("Rank of random anchors matrix:", torch.linalg.matrix_rank(anchors_random).item())
+
+        # Test: Compute orthogonality measures.
+        opt_ortho = compute_orthogonality(anch_baseline)
+        rand_ortho = compute_orthogonality(anchors_random)
+        print("Optimized anchors orthogonality measure (avg abs off-diagonal):", opt_ortho.item())
+        print("Random anchors orthogonality measure (avg abs off-diagonal):", rand_ortho.item())
+
+        # Select 20 random anchors from anch_baseline and print their length.
+        random_indices = np.random.choice(anch_baseline.shape[0], 20, replace=False)
+        random_anchors = anch_baseline[random_indices]
+        anchor_lengths = torch.norm(random_anchors, p=2, dim=1)
+        print("Euclidean lengths of 20 random anchors:", anchor_lengths)
+
+        # Select 20 random anchors from anchors_random and print their length.
+        random_anchors = anchors_random[random_indices]
+        anchor_lengths = torch.norm(random_anchors, p=2, dim=1)
+        print("Euclidean lengths of 20 random anchors:", anchor_lengths)
+
 
         # Train absolute classifier (on original features)
         abs_classifier = build_classifier(
@@ -312,7 +345,7 @@ def main():
         # 3. For each transformer, use their precomputed test features.
         #####################################
         for tname in transformer_names:
-            print(f"\nEvaluating transformer: {tname}")
+            # print(f"\nEvaluating transformer: {tname}")
             t_feats = features_dict[tname]
             t_train_features, _ = t_feats["train_features"], t_feats["train_labels"]
             t_test_features, t_test_labels = t_feats["test_features"], t_feats["test_labels"]
@@ -321,13 +354,13 @@ def main():
             anch_t_opt = anchor_selector(t_train_features.to(device))
             t_test_rel_opt = relative_projection(t_test_features, anch_t_opt)
             rel_f1_opt = evaluate_classifier(P_rel_classifier, t_test_rel_opt, t_test_labels, device)
-            print(f"Transformer {tname} | Optimized Relative Test F1: {rel_f1_opt:.2f}%")
+            # print(f"Transformer {tname} | Optimized Relative Test F1: {rel_f1_opt:.2f}%")
 
             # For random anchors on transformer data (using the same random indices):
             anchors_t_rand = t_train_features[random_anchor_indices]
             t_test_rel_rand = relative_projection(t_test_features, anchors_t_rand)
             rel_f1_rand = evaluate_classifier(rand_rel_classifier, t_test_rel_rand, t_test_labels, device)
-            print(f"Transformer {tname} | Random Relative Test F1: {rel_f1_rand:.2f}%")
+            # print(f"Transformer {tname} | Random Relative Test F1: {rel_f1_rand:.2f}%")
 
             results[baseline_name]["optimized"][tname] = rel_f1_opt
             results[baseline_name]["random"][tname] = rel_f1_rand
