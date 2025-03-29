@@ -146,13 +146,6 @@ def evaluate_classifier(classifier, feats, labels, device):
     f1 = f1_score(true_labels, preds, average="macro")
     return 100 * f1
 
-def compute_orthogonality(anchors):
-    anchors_norm = F.normalize(anchors, p=2, dim=1)
-    sim_matrix = anchors_norm @ anchors_norm.t()
-    num = anchors.size(0)
-    off_diag = sim_matrix - torch.eye(num, device=anchors.device)
-    return off_diag.abs().mean()
-
 # Lists of transformer model names.
 transformer_names = [
     "vit_base_patch16_224",
@@ -181,7 +174,7 @@ def main():
     diversity_w = 1 - coverage_w
     anti_collapse_w = 0
     anchor_encoder = 'vit_base_patch16_224'
-    P_dist_measure = "mahalanobis"
+    P_dist_measure = "euclidean"  # "euclidean", "cosine", or "mahalanobis"
     n_seeds = 4
 
     print("Loading the CIFAR-100 dataset...")

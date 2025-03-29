@@ -22,24 +22,24 @@ loader = val_loader
 use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
-model = Autoencoder #VariationalAutoencoder, AEClassifier, or Autoencoder
+model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 10         # If load_saved: Must match an existing dim
+dim = 20         # If load_saved: Must match an existing dim
 anchor_num = dim
-nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
-hidden_layer = 128 # (32, 64, 128)
+nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
+hidden_layer = (32, 64) # (32, 64) or 128
 
 # Hyperparameters for anchor selection
-coverage_w = 0.0 # Coverage of embeddings
+coverage_w = 1 # Coverage of embeddings
 diversity_w = 1 - coverage_w # Pairwise between anchors
 anti_collapse_w = 0
 exponent = 1
 
 # Post-processing
-zero_shot = False
+zero_shot = True
 plot_embeddings = True
-compute_mrr = False      # Only set true if you have >32GB of RAM
+compute_mrr = True      # Only set true if you have >32GB of RAM
 compute_similarity = True
 ### ###
 
@@ -85,7 +85,7 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # TODO: Check the loss of this, is it converging, or do we need to fix the weights?
-# TODO: Currently we are only optimizing with euclidian. We should also implement cossim
+# TODO: Currently we are only optimizing with euclidean. We should also implement cossim
 # TODO: Compare P with the for loop greedy anchor search
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list = get_optimized_anchors(
@@ -97,36 +97,11 @@ _, P_anchors_list = get_optimized_anchors(
     diversity_weight=diversity_w,
     anti_collapse_w=anti_collapse_w,
     exponent=exponent,
-    dist_measure="mahalanobis", ## "euclidian", "mahalanobis"
+    dist_measure="euclidean", ## "euclidean", "mahalanobis", "cosine"
     verbose=True,
     device=device,
 )
 anch_list = P_anchors_list
-
-# print("Pairwise cosine angles between all anchors:")
-# anch_for_angl = anch_list[0]
-# n_anchors = len(anch_for_angl)
-# for i in range(n_anchors):
-#     for j in range(i+1, n_anchors):
-#         anchor1 = anch_for_angl[i]
-#         anchor2 = anch_for_angl[j]
-#         dot_product = np.dot(anchor1, anchor2)
-#         norm1 = np.linalg.norm(anchor1)
-#         norm2 = np.linalg.norm(anchor2)
-#         cos_angle = dot_product / (norm1 * norm2)
-#         cos_angle = np.clip(cos_angle, -1.0, 1.0)
-#         angle_deg = math.degrees(math.acos(cos_angle))
-#         print(f"Anchors {i} and {j}: {angle_deg:.2f}°")
-
-
-# # Print the Euclidean length of each anchor from the first run of optimized anchors
-# print("\nEuclidean lengths of all anchors:")
-# for i, anchor in enumerate(anch_list[0]):
-#     length = np.linalg.norm(anchor)
-#     print(f"Anchor {i}: {length:.4f}")
-
-# anchor_matrix = np.array(anch_list[0])
-# print("Rank of the anchor matrix:", np.linalg.matrix_rank(anchor_matrix))
 
 # Compute relative coordinates for the embeddings
 relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)

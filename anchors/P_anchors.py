@@ -119,7 +119,7 @@ def diversity_loss_mahalanobis(anchors, inv_cov, exponent=1.0):
     if len(dists) == 0:
         return torch.tensor(0.0, device=anchors.device)
     dists = torch.stack(dists)
-    return torch.mean(dists ** exponent)
+    return -torch.mean(dists ** exponent)
 
 # Batched version for Mahalanobis coverage loss.
 def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=1024):
@@ -134,7 +134,7 @@ def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=1
         min_dists, _ = torch.min(dists, dim=1)
         total_loss += torch.sum(min_dists)
         total_samples += emb_batch.size(0)
-    return -total_loss / total_samples
+    return total_loss / total_samples
 
 # Batched version for Mahalanobis diversity loss.
 def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_size=256):
@@ -153,7 +153,7 @@ def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_siz
             count += dists.numel()
     if count == 0:
         return torch.tensor(0.0, device=anchors.device)
-    return total_loss / count
+    return -total_loss / count
 
 
 def anti_collapse_loss(anchors):
@@ -184,7 +184,7 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
     optimizer = torch.optim.Adam(anchor_selector.parameters(), lr=lr)
     for epoch in range(epochs):
         anchors = anchor_selector(embeddings)
-        if dist_measure == "euclidian":
+        if dist_measure == "euclidean":
             loss_cov = coverage_loss_eucl(anchors, embeddings)
             loss_div = diversity_loss_eucl(anchors, exponent=exp)
             anti_collapse_w = 0.0  # No anti-collapse loss needed for euclidean
@@ -197,7 +197,7 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
             loss_cov = coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov)
             loss_div = diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=exp)
         else:
-            raise ValueError(f"dist_measure must be one of 'euclidian', 'cosine', or 'mahalanobis' but was {dist_measure}.")
+            raise ValueError(f"dist_measure must be one of 'euclidean', 'cosine', or 'mahalanobis' but was {dist_measure}.")
         loss = diversity_weight * loss_div + coverage_weight * loss_cov - anti_collapse_w * anchor_size_loss(anchors)
 
         optimizer.zero_grad()

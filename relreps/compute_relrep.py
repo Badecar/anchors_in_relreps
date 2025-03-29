@@ -56,37 +56,24 @@ def compute_relative_coordinates_mahalanobis(embeddings_list, anchors_list, inv_
   
     If inv_cov is not provided, it is computed from the embeddings using the sample covariance.
 
-    Args:
-        embeddings_list (list of np.array): List of embeddings arrays, each with shape [N, d].
-        anchors_list (list of np.array): List of anchor arrays, each with shape [A, d].
-        inv_cov (np.array, optional): Precomputed inverse covariance matrix of shape [d, d]. 
-            If None, it is computed per run.
-        epsilon (float, optional): Small constant for numerical stability when inverting.
-
     Returns:
         List of np.array: Each array has shape [N, A] containing the negative Mahalanobis distances.
                           (Negative distances so that closer points have higher similarity.)
     """
     relative_reps_outer = []
     for embeddings, anchors in zip(embeddings_list, anchors_list):
-        # If inv_cov not provided, compute it from the embeddings.
         if inv_cov is None:
-            # np.cov expects variables in rows so set rowvar=False for data in columns.
             cov = np.cov(embeddings, rowvar=False)
             inv_cov_run = np.linalg.inv(cov + epsilon * np.eye(cov.shape[0]))
         else:
             inv_cov_run = inv_cov
 
-        # Compute pairwise differences: shape [N, A, d]
         diff = embeddings[:, None, :] - anchors[None, :, :]
-        # Compute squared Mahalanobis distances: for each [n, a]:
-        # sum_{d,c} diff[n,a,d] * inv_cov_run[d,c] * diff[n,a,c]
         sq_dists = np.einsum("nad,dc,nac->na", diff, inv_cov_run, diff)
-        # Add a small constant for numerical stability and take square root.
         dists = np.sqrt(sq_dists + 1e-8)
-        # Return negative distances so that a smaller distance gives a higher similarity.
         rel_rep = -dists
-        relative_reps_outer.append(rel_rep)
+        # Cast to float32 so that the output matches the types of the other functions.
+        relative_reps_outer.append(rel_rep.astype(np.float32))
     return relative_reps_outer
 
 
