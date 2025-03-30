@@ -23,7 +23,7 @@ from sklearn.cluster import KMeans
 from utils import set_random_seeds
 from P_anchors import get_optimized_anchors
 
-os.environ["LOKY_MAX_CPU_COUNT"] = "8"  # or however many cores you want to use
+os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
 # Lambda module for wrapping lambda functions in nn.Sequential
 class Lambda(nn.Module):

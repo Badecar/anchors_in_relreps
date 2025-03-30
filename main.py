@@ -26,7 +26,7 @@ model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
 dim = 20         # If load_saved: Must match an existing dim
-anchor_num = dim+1
+anchor_num = dim + 5
 nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64) # (32, 64) or 128
 
@@ -37,8 +37,8 @@ anti_collapse_w = 0
 exponent = 1
 
 # Post-processing
-zero_shot = True
-plot_embeddings = True
+zero_shot = False
+plot_embeddings = False
 compute_mrr = True      # Only set true if you have >32GB of RAM
 compute_similarity = True
 ### ###
@@ -98,10 +98,14 @@ _, P_anchors_list = get_optimized_anchors(
     anti_collapse_w=anti_collapse_w,
     exponent=exponent,
     dist_measure="euclidean", ## "euclidean", "mahalanobis", "cosine"
-    verbose=True,
+    verbose=False,
     device=device,
 )
-anch_list = P_anchors_list
+
+# Computing kmeans anchors
+kmeans_anchors_list, _ = get_kmeans_based_anchors(emb_list, idx_list, anchor_num, n_closest=100, kmeans_seed=42)
+
+anch_list = kmeans_anchors_list # P_anchors_list, rand_anchors_list, kmeans_anchors_list
 
 # Compute relative coordinates for the embeddings
 relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)
@@ -119,7 +123,7 @@ if zero_shot:
         loader=loader,
         nr_runs=nr_runs,
         device=device,
-        show=True,
+        show=False,
         verbose=True
     )
 

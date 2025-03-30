@@ -78,6 +78,7 @@ class rel_AE_conv_MNIST(nn.Module):
         Returns:
             x_rec (Tensor): flattened reconstructions with shape [batch_size, 784]
         """
+        relative_embedding = relative_embedding.float()
         decoder_in = self.decoder_in(relative_embedding)
         # Reshape to conv feature map shape (omit batch dim from encoder_out_shape)
         decoder_in_conv = decoder_in.view(-1, *self.encoder_out_shape[1:])
