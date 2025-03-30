@@ -8,7 +8,7 @@ from visualization import *
 from anchors import *
 from relreps import *
 from zero_shot import *
-import math
+import numpy as np
 
 set_random_seeds(42)
 
@@ -26,12 +26,12 @@ model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
 dim = 20         # If load_saved: Must match an existing dim
-anchor_num = dim
+anchor_num = dim+1
 nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64) # (32, 64) or 128
 
 # Hyperparameters for anchor selection
-coverage_w = 1 # Coverage of embeddings
+coverage_w = 0.9 # Coverage of embeddings
 diversity_w = 1 - coverage_w # Pairwise between anchors
 anti_collapse_w = 0
 exponent = 1

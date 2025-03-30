@@ -44,7 +44,6 @@ def compute_relative_coordinates_euclidean(embeddings_list, anchors_list, flatte
         relative_reps_outer.append(diff)
     return relative_reps_outer
 
-
 def compute_relative_coordinates_mahalanobis(embeddings_list, anchors_list, inv_cov=None, epsilon=1e-6):
     """
     Computes the relative representation based on the Mahalanobis distance.
