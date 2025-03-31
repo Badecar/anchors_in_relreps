@@ -19,9 +19,10 @@ import matplotlib.pyplot as plt
 import csv
 import numpy as np
 from sklearn.cluster import KMeans
+from scipy.optimize import minimize
 
 from utils import set_random_seeds
-from P_anchors import get_optimized_anchors
+from P_anchors import get_optimized_anchors, optimize_weights, get_P_anchors_clustered
 
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
@@ -33,47 +34,6 @@ class Lambda(nn.Module):
     def forward(self, x):
         return self.func(x)
 
-def get_kmeans_datapoint_anchors(emb_source, emb_target, anchor_num, random_state=0, verbose=True):
-    """
-    Clusters emb_source using KMeans and then for each cluster finds the datapoint in emb_source
-    that is closest to the cluster center. Returns the corresponding datapoints from emb_target.
-    
-    Args:
-      emb_source (np.ndarray): Array [N, D] for clustering (e.g. features from one encoder).
-      emb_target (np.ndarray): Array [N, D2] with corresponding datapoints (e.g. features from the other encoder).
-      anchor_num (int): Number of clusters/anchors.
-      random_state (int): Random seed for reproducibility.
-      verbose (bool): If True, prints clustering statistics.
-      
-    Returns:
-      anchors_target (np.ndarray): Anchors chosen from emb_target (shape [anchor_num, D2]).
-      medoid_indices (list of int): The indices of the selected datapoints.
-    """
-    kmeans = KMeans(n_clusters=anchor_num, random_state=random_state)
-    kmeans.fit(emb_source)
-    centers = kmeans.cluster_centers_
-    labels = kmeans.labels_
-    
-    medoid_indices = []
-    for i in range(anchor_num):
-        # Get indices of datapoints belonging to cluster i
-        cluster_indices = np.where(labels == i)[0]
-        if len(cluster_indices) == 0:
-            continue
-        # Compute Euclidean distances from the cluster center
-        cluster_points = emb_source[cluster_indices]
-        dists = np.linalg.norm(cluster_points - centers[i], axis=1)
-        # Find the index of the closest point (medoid)
-        medoid_index_local = np.argmin(dists)
-        medoid_index = cluster_indices[medoid_index_local]
-        medoid_indices.append(medoid_index)
-    
-    if verbose:
-        print("KMeans medoids indices:", medoid_indices)
-        
-    anchors_target = emb_target[medoid_indices]
-    return anchors_target, medoid_indices
-
 # ----- Relative projection functions -----
 def relative_projection_cosine(x, anchors):
     # x: (batch, d), anchors: (num_anchors, d)
@@ -81,9 +41,17 @@ def relative_projection_cosine(x, anchors):
     anchors = F.normalize(anchors, p=2, dim=-1).to(x.device)
     return torch.einsum("bm, am -> ba", x, anchors)
 
+def relative_projection_euclidean(x, anchors):
+    # Use negative Euclidean distances as similarity.
+    # torch.cdist returns (batch, num_anchors)
+    return - torch.cdist(x, anchors, p=2)
+
 def relative_projection_mahalanobis_batched(x, anchors, inv_cov, batch_size=512):
+    # Ensure anchors is a torch.Tensor
+    if not isinstance(anchors, torch.Tensor):
+        anchors = torch.tensor(anchors, device=x.device, dtype=x.dtype)
     result = []
-    for i in tqdm(range(0, x.size(0), batch_size), desc="Processing batches"):
+    for i in range(0, x.size(0), batch_size):
         x_batch = x[i:i+batch_size]
         diff = x_batch.unsqueeze(1) - anchors.unsqueeze(0)  # (B, num_anchors, d)
         dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8)
@@ -96,37 +64,6 @@ def compute_covariance_matrix(features):
     cov = (centered.t() @ centered) / (features.size(0) - 1)
     return cov
 
-# ----- Classifier and training/evaluation functions -----
-def build_classifier(input_dim, intermediate_dim, num_classes):
-    return nn.Sequential(
-        nn.LayerNorm(input_dim),
-        nn.Linear(input_dim, intermediate_dim),
-        nn.Tanh(),
-        Lambda(lambda x: x.permute(1, 0)),
-        nn.InstanceNorm1d(intermediate_dim),
-        Lambda(lambda x: x.permute(1, 0)),
-        nn.Linear(intermediate_dim, num_classes)
-    )
-
-def train_classifier(classifier, train_feats, train_labels, device, num_epochs=7):
-    classifier.train()
-    optimizer = optim.Adam(classifier.parameters(), lr=1e-3)
-    criterion = nn.CrossEntropyLoss()
-    dataset = TensorDataset(train_feats, train_labels)
-    loader = DataLoader(dataset, batch_size=32, shuffle=True)
-    for epoch in range(num_epochs):
-        running_loss = 0.0
-        for feats, labels in loader:
-            feats, labels = feats.to(device), labels.to(device)
-            optimizer.zero_grad()
-            logits = classifier(feats)
-            loss = criterion(logits, labels)
-            loss.backward()
-            optimizer.step()
-            running_loss += loss.item() * feats.size(0)
-        avg_loss = running_loss / len(dataset)
-        print(f"  Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
-    return classifier
 
 def evaluate_classifier(classifier, feats, labels, device):
     classifier.eval()
@@ -166,22 +103,117 @@ def extract_features(model, dataloader, device):
     labels = torch.cat(labels_list, dim=0)
     return features, labels
 
+def get_kmeans_based_anchors_parallel(src_emb, tgt_emb, anchor_num, n_closest=20, kmeans_seed=42, verbose=False):
+    """
+    Computes "parallel" anchors from two embeddings (source and target) using the same candidate indices.
+    
+    Steps:
+      1. Run KMeans on the source embeddings (src_emb) with n_clusters=anchor_num.
+      2. For each cluster center, compute Euclidean distances (in src_emb) and select the n_closest points.
+      3. Compute optimized weights (with an entropy-like regularization) so that the weighted combination
+         of these candidate points approximates the cluster center.
+      4. Use the same candidate global indices (assuming same order in src_emb and tgt_emb) to compute
+         weighted averages in both src_emb and tgt_emb.
+    
+    Args:
+      src_emb: numpy array of shape [N, D_src] – used for clustering.
+      tgt_emb: numpy array of shape [N, D_tgt] – parallel datapoints.
+      anchor_num: number of anchors/clusters.
+      n_closest: number of candidate points per cluster.
+      kmeans_seed: random seed for KMeans.
+      verbose: if True, prints debugging information.
+      
+    Returns:
+      anchors_src: numpy array of shape [anchor_num, D_src] (approximated anchors from src_emb)
+      anchors_tgt: numpy array of shape [anchor_num, D_tgt] (parallel anchors from tgt_emb)
+      clusters_info: list of tuples for each cluster: (candidate_indices, weights, center)
+                     where candidate_indices are indices in src_emb (and tgt_emb) used for the weighted average.
+    """
+    N = src_emb.shape[0]
+    global_idx = np.arange(N)
+    kmeans = KMeans(n_clusters=anchor_num, random_state=kmeans_seed)
+    kmeans.fit(src_emb)
+    centers = kmeans.cluster_centers_
+    
+    clusters_info = []
+    anchors_src = []
+    anchors_tgt = []
+    
+    for center in tqdm(centers, desc="Processing clusters"):
+        dists = np.linalg.norm(src_emb - center, axis=1)
+        candidate_order = np.argsort(dists)[:n_closest]
+        candidate_global = global_idx[candidate_order]  # These are global indices.
+        candidate_points = src_emb[candidate_order]
+        weights = optimize_weights(center, candidate_points)
+        clusters_info.append((candidate_global, weights, center))
+        # Use the same candidate indices to get weighted averages in both embeddings.
+        anchor_src = np.average(src_emb[candidate_global], axis=0, weights=weights)
+        anchor_tgt = np.average(tgt_emb[candidate_global], axis=0, weights=weights)
+        anchors_src.append(anchor_src)
+        anchors_tgt.append(anchor_tgt)
+    
+    anchors_src = np.vstack(anchors_src)
+    anchors_tgt = np.vstack(anchors_tgt)
+    
+    if verbose:
+        print("KMeans centers (first):", centers[0])
+        print("First cluster candidates indices:", clusters_info[0][0])
+        print("First approximated anchor (src):", anchors_src[0])
+        print("First approximated anchor (tgt):", anchors_tgt[0])
+    
+    return anchors_src, anchors_tgt, clusters_info
+
+def build_classifier(input_dim, intermediate_dim, num_classes, dropout_p=0.5):
+    return nn.Sequential(
+        nn.LayerNorm(input_dim),
+        nn.Linear(input_dim, intermediate_dim),
+        nn.Tanh(),
+        nn.Dropout(p=dropout_p),  # added dropout
+        Lambda(lambda x: x.permute(1, 0)),
+        nn.InstanceNorm1d(intermediate_dim),
+        Lambda(lambda x: x.permute(1, 0)),
+        nn.Linear(intermediate_dim, num_classes)
+    )
+
+def train_classifier(classifier, train_feats, train_labels, device, num_epochs=7, weight_decay=1e-4):
+    classifier.train()
+    optimizer = optim.Adam(classifier.parameters(), lr=1e-3, weight_decay=weight_decay)  # weight_decay added
+    criterion = nn.CrossEntropyLoss()
+    dataset = TensorDataset(train_feats, train_labels)
+    loader = DataLoader(dataset, batch_size=32, shuffle=True)
+    for epoch in range(num_epochs):
+        running_loss = 0.0
+        for feats, labels in loader:
+            feats, labels = feats.to(device), labels.to(device)
+            optimizer.zero_grad()
+            logits = classifier(feats)
+            loss = criterion(logits, labels)
+            loss.backward()
+            optimizer.step()
+            running_loss += loss.item() * feats.size(0)
+        avg_loss = running_loss / len(dataset)
+        print(f"  Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
+    return classifier
+
 # ----- Main experiment -----
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_perc = 1.0
     batch_size = 64
-    num_epochs = 7
-    n_seeds = 10  # seeds per anchor configuration
+    num_epochs = 9
+    n_closest = 20 # number of closest points to each KMeans or P center
+    n_seeds = 7  # seeds per anchor configuration
 
-    transformer_names = [
+    anchor_nums = list(range(300, 601, 50))
+
+    transformer_names = [ #to copy and paste from
     "vit_base_patch16_224",
     "rexnet_100",
     "vit_base_resnet50_384",
     "vit_small_patch16_224"
     ]
 
-    decoder_transformer = "rexnet_100"
+    decoder_transformer = "vit_base_resnet50_384"
     zero_shot_transformer = "vit_small_patch16_224"
 
     print("Loading CIFAR-100 dataset...")
@@ -221,6 +253,9 @@ def main():
             }
         torch.save(features_dict, features_file)
         print(f"Saved precomputed features to {features_file}")
+
+    print("Train dataset size:", len(train_dataset))
+    print("Test dataset size:", len(test_dataset))
     
     # For training the relative decoder, use features from decoder_transformer.
     enc1_feats_train = features_dict[decoder_transformer]["train_features"]
@@ -232,11 +267,14 @@ def main():
     enc2_feats_train = features_dict[zero_shot_transformer]["train_features"]
     enc2_feats_test = features_dict[zero_shot_transformer]["test_features"]
     enc2_labels_test = features_dict[zero_shot_transformer]["test_labels"]
+
+    emb_list = [enc1_feats_test.cpu().numpy(), enc2_feats_test.cpu().numpy()] # For anchors
+
     
     # --- Experiment: Loop over anchor numbers ---
-    anchor_nums = list(range(100, 1001, 50))
     results_random = {a: [] for a in anchor_nums}
     results_optimized = {a: [] for a in anchor_nums}
+    results_kmeans = {a: [] for a in anchor_nums}
     
     # For each configuration, we use the same random anchor indices (fixed across models)
     for num_anchors in anchor_nums:
@@ -254,32 +292,49 @@ def main():
             rel_train_random = relative_projection_cosine(enc1_feats_train.to(device), anchors_random_train)
             
             # Optimized method: optimize anchors on training features (decoder_transformer)
-            coverage_w = 0.9
+            coverage_w = 1
             diversity_w = 1 - coverage_w
             anti_collapse_w = 0
-            anchor_selector, _ = get_optimized_anchors(
-                emb=[enc1_feats_train.cpu().numpy()],
-                anchor_num=num_anchors,
-                epochs=200,
-                lr=1e-2,
-                coverage_weight=coverage_w,
-                diversity_weight=diversity_w,
-                anti_collapse_w=anti_collapse_w,
-                exponent=1,
-                dist_measure="euclidean",
-                verbose=True,
-                device=device
-            )
-            for param in anchor_selector.parameters():
-                param.requires_grad = False
+            clusterd_P_anchors = True
+            
+            if clusterd_P_anchors:
+                _, P_anchors, _ = get_P_anchors_clustered(
+                    emb=emb_list,
+                    anchor_num=num_anchors,
+                    n_closest=n_closest,
+                    epochs=200,
+                    lr=1e-2,
+                    coverage_weight=coverage_w,
+                    diversity_weight=diversity_w,
+                    anti_collapse_w=anti_collapse_w,
+                    exponent=1,
+                    dist_measure="euclidean",
+                    verbose=True,
+                    device=device
+                )
+            else:
+                _, P_anchors = get_optimized_anchors(
+                    emb=emb_list,
+                    anchor_num=num_anchors,
+                    epochs=200,
+                    lr=1e-2,
+                    coverage_weight=coverage_w,
+                    diversity_weight=diversity_w,
+                    anti_collapse_w=anti_collapse_w,
+                    exponent=1,
+                    dist_measure="euclidean",
+                    verbose=False,
+                    device=device
+                )
+            
+            P_anchors_enc1, P_anchors_enc2 = P_anchors[0], P_anchors[1]
 
             print("Computing cov matrix")
-            anchors_optimized_train = anchor_selector(enc1_feats_train.to(device))
             cov_train = compute_covariance_matrix(enc1_feats_train.to(device))
             inv_cov_train = torch.linalg.inv(cov_train + 1e-6 * torch.eye(cov_train.size(0), device=cov_train.device))
             print("Computing relative projection")
             rel_train_optimized = relative_projection_mahalanobis_batched(enc1_feats_train.to(device),
-                                                                         anchors_optimized_train, inv_cov_train)
+                                                                         P_anchors_enc1, inv_cov_train)
 
             # Train classifiers on the relative representations
             clf_random = build_classifier(num_anchors, num_anchors, num_classes).to(device)
@@ -297,50 +352,48 @@ def main():
             rel_test_random = relative_projection_cosine(enc2_feats_test.to(device), anchors_random_test)
             f1_random = evaluate_classifier(clf_random, rel_test_random, enc2_labels_test.to(device), device)
             
-            anchors_optimized_test = anchor_selector(enc2_feats_train.to(device))
             cov_test = compute_covariance_matrix(enc2_feats_train.to(device))
             inv_cov_test = torch.linalg.inv(cov_test + 1e-6 * torch.eye(cov_test.size(0), device=cov_test.device))
             rel_test_optimized = relative_projection_mahalanobis_batched(enc2_feats_test.to(device),
-                                                                        anchors_optimized_test, inv_cov_test)
+                                                                        P_anchors_enc2, inv_cov_test)
             f1_optimized = evaluate_classifier(clf_optimized, rel_test_optimized, enc2_labels_test.to(device), device)
             
             print(f"  Random (cosine) F1: {f1_random:.2f}%, Optimized (mahalanobis) F1: {f1_optimized:.2f}%")
             results_random[num_anchors].append(f1_random)
             results_optimized[num_anchors].append(f1_optimized)
 
+            # ### TESTING KMEANS ANCHORS ###
+            print("Computing KMeans-based datapoint anchors on enc1")
+            anchors_enc1_np, anchors_enc2_np, _ = get_kmeans_based_anchors_parallel(
+                src_emb=enc1_feats_test.cpu().numpy(),
+                tgt_emb=enc2_feats_test.cpu().numpy(),
+                anchor_num=num_anchors,
+                n_closest=n_closest,
+                kmeans_seed=seed,
+                verbose=False
+            )
 
-            # print("Computing KMeans-based datapoint anchors on enc1")
-            # # Cluster on encoder1 training features and get medoid indices
-            # anchors_enc1_train_np, medoid_indices = get_kmeans_datapoint_anchors(
-            #     emb_source=enc1_feats_test.cpu().numpy(),        # clustering on enc1
-            #     emb_target=enc1_feats_test.cpu().numpy(),          # we want the medoids from enc1
-            #     anchor_num=num_anchors,
-            #     random_state=seed,
-            #     verbose=False
-            # )
-            # # Convert chosen enc1 datapoints to tensor -> these are the enc1 anchors.
-            # anchors_enc1 = torch.tensor(anchors_enc1_train_np, device=device, dtype=enc1_feats_train.dtype)
+            # Convert to torch tensors as needed:
+            anchors_enc1 = torch.tensor(anchors_enc1_np, device=device, dtype=enc1_feats_test.dtype)
+            anchors_enc2 = torch.tensor(anchors_enc2_np, device=device, dtype=enc2_feats_test.dtype)
 
-            # # Get the corresponding datapoints from enc2 using the same medoid indices.
-            # anchors_enc2 = enc2_feats_test[medoid_indices].to(device)
+            # ------------------------- Training -----------------------------
+            # Compute covariance/inverse cov on enc1 training features and compute relative representations
+            cov_enc1 = compute_covariance_matrix(enc1_feats_train.to(device))
+            inv_cov_enc1 = torch.linalg.inv(cov_enc1 + 1e-6 * torch.eye(cov_enc1.size(0), device=cov_enc1.device))
+            rel_train_kmeans = relative_projection_mahalanobis_batched(
+                enc1_feats_train.to(device),
+                anchors_enc1,
+                inv_cov_enc1
+            )
 
-            # # ------------------------- Training -----------------------------
-            # # Compute covariance/inverse cov on enc1 training features and compute relative representations
-            # cov_enc1 = compute_covariance_matrix(enc1_feats_train.to(device))
-            # inv_cov_enc1 = torch.linalg.inv(cov_enc1 + 1e-6 * torch.eye(cov_enc1.size(0), device=cov_enc1.device))
-            # rel_train_kmeans = relative_projection_mahalanobis_batched(
-            #     enc1_feats_train.to(device),
-            #     anchors_enc1,
-            #     inv_cov_enc1
-            # )
-
-            # # Train a classifier using the enc1-based relative representations (with enc1 labels)
-            # clf_kmeans = build_classifier(num_anchors, num_anchors, num_classes).to(device)
-            # print(" Training KMeans relative decoder (train on enc1 relrep):")
-            # clf_kmeans = train_classifier(clf_kmeans, rel_train_kmeans, enc1_labels_train.to(device),
-            #                             device, num_epochs=8)
+            # Train a classifier using the enc1-based relative representations (with enc1 labels)
+            clf_kmeans = build_classifier(num_anchors, num_anchors, num_classes).to(device)
+            print(" Training KMeans relative decoder (train on enc1 relrep):")
+            clf_kmeans = train_classifier(clf_kmeans, rel_train_kmeans, enc1_labels_train.to(device),
+                                        device, num_epochs=num_epochs)
             
-            # #testing
+            ### TESTING NO ZERO SHOT CLASSIFIER PERFORMANCE TO CHECK FOR OVERFITTING ###
             # cov_enc1_test = compute_covariance_matrix(enc1_feats_test.to(device))
             # inv_cov_enc1_test = torch.linalg.inv(cov_enc1_test + 1e-6 * torch.eye(cov_enc1_test.size(0), device=cov_enc1_test.device))
             # rel_test_kmeans = relative_projection_mahalanobis_batched(
@@ -350,21 +403,57 @@ def main():
             # )
 
             # f1_kmeans = evaluate_classifier(clf_kmeans, rel_test_kmeans, enc1_labels_test.to(device), device)
-            # print(f"  KMeans (mahalanobis) NO ZERO SHOT F1: {f1_kmeans:.2f}%")
+            # print(f"  KMeans (mahalanobis) NO ZERO SHOT test data F1: {f1_kmeans:.2f}%")
             # f1_kmeans = evaluate_classifier(clf_kmeans, rel_train_kmeans, enc1_labels_train.to(device), device)
-            # print(f"  KMeans (mahalanobis) NO ZERO SHOT F1: {f1_kmeans:.2f}%")
+            # print(f"  KMeans (mahalanobis) NO ZERO SHOT train data F1: {f1_kmeans:.2f}%")
 
-            # # ------------------------- Testing -----------------------------
-            # # For testing, select the corresponding enc2 anchors using the same medoid indices.
-            # cov_enc2 = compute_covariance_matrix(enc2_feats_test.to(device))
-            # inv_cov_enc2 = torch.linalg.inv(cov_enc2 + 1e-6 * torch.eye(cov_enc2.size(0), device=cov_enc2.device))
-            # rel_test_kmeans = relative_projection_mahalanobis_batched(
-            #     enc2_feats_test.to(device),
-            #     anchors_enc2,
-            #     inv_cov_enc2
-            # )
-            # f1_kmeans = evaluate_classifier(clf_kmeans, rel_test_kmeans, enc2_labels_test.to(device), device)
-            # print(f"  KMeans (mahalanobis) F1: {f1_kmeans:.2f}%")
+
+            # ------------------------- Testing -----------------------------
+            # For testing, select the corresponding enc2 anchors using the same medoid indices.
+            cov_enc2 = compute_covariance_matrix(enc2_feats_test.to(device))
+            inv_cov_enc2 = torch.linalg.inv(cov_enc2 + 1e-6 * torch.eye(cov_enc2.size(0), device=cov_enc2.device))
+            rel_test_kmeans = relative_projection_mahalanobis_batched(
+                enc2_feats_test.to(device),
+                anchors_enc2,
+                inv_cov_enc2
+            )
+            f1_kmeans = evaluate_classifier(clf_kmeans, rel_test_kmeans, enc2_labels_test.to(device), device)
+            print(f"  KMeans (mahalanobis) F1: {f1_kmeans:.2f}%")
+            results_kmeans[num_anchors].append(f1_kmeans)
+
+
+            ### TESTING KMEANS WITH EUCLIDEAN AND COSINE SIMILARITY ###
+            
+            # # ----- Euclidean Relative Representations Kmeans -----
+            # print("Computing Euclidean relative projections using KMeans anchors")
+            # # Compute relative representations on training features using negative euclidean distances.
+            # rel_train_kmeans_eucl = relative_projection_euclidean(enc1_feats_train.to(device), anchors_enc1)
+            # # Retrain a new classifier using these Euclidean relative representations.
+            # clf_kmeans_eucl = build_classifier(num_anchors, num_anchors, num_classes).to(device)
+            # print(" Training KMeans relative decoder (Euclidean) on enc1 relrep:")
+            # clf_kmeans_eucl = train_classifier(clf_kmeans_eucl, rel_train_kmeans_eucl, 
+            #                                 enc1_labels_train.to(device), device, num_epochs=8)
+            # # Compute test relative representations for Euclidean projection on target features.
+            # rel_test_kmeans_eucl = relative_projection_euclidean(enc2_feats_test.to(device), anchors_enc2)
+            # f1_kmeans_eucl = evaluate_classifier(clf_kmeans_eucl, rel_test_kmeans_eucl, 
+            #                                     enc2_labels_test.to(device), device)
+            # print(f"  KMeans (euclidean) F1: {f1_kmeans_eucl:.2f}%")
+
+            # # ----- Cosine Relative Representations Kmeans -----
+            # print("Computing Cosine relative projections using KMeans anchors")
+            # # Compute relative representations on training features using cosine similarity.
+            # rel_train_kmeans_cos = relative_projection_cosine(enc1_feats_train.to(device), anchors_enc1)
+            # # Retrain a new classifier for cosine-based projections.
+            # clf_kmeans_cos = build_classifier(num_anchors, num_anchors, num_classes).to(device)
+            # print(" Training KMeans relative decoder (cosine) on enc1 relrep:")
+            # clf_kmeans_cos = train_classifier(clf_kmeans_cos, rel_train_kmeans_cos, 
+            #                                 enc1_labels_train.to(device), device, num_epochs=8)
+            # # Compute test relative representations for cosine projection on target features.
+            # rel_test_kmeans_cos = relative_projection_cosine(enc2_feats_test.to(device), anchors_enc2)
+            # f1_kmeans_cos = evaluate_classifier(clf_kmeans_cos, rel_test_kmeans_cos, 
+            #                                     enc2_labels_test.to(device), device)
+            # print(f"  KMeans (cosine) F1: {f1_kmeans_cos:.2f}%")
+            
     
     # --- Compute mean and std for each anchor number ---
     anchor_nums_arr = []
@@ -372,44 +461,57 @@ def main():
     random_stds = []
     optimized_means = []
     optimized_stds = []
+    kmeans_means = []
+    kmeans_stds = []
     for a in anchor_nums:
         anchor_nums_arr.append(a)
         r_mean = np.mean(results_random[a])
         r_std = np.std(results_random[a])
         o_mean = np.mean(results_optimized[a])
         o_std = np.std(results_optimized[a])
+        k_mean = np.mean(results_kmeans[a])
+        k_std = np.std(results_kmeans[a])
         random_means.append(r_mean)
         random_stds.append(r_std)
         optimized_means.append(o_mean)
         optimized_stds.append(o_std)
-        print(f"Anchors: {a}, Random: {r_mean:.2f}% ± {r_std:.2f}%, Optimized: {o_mean:.2f}% ± {o_std:.2f}%")
-    
+        kmeans_means.append(k_mean)
+        kmeans_stds.append(k_std)
+        print(f"Anchors: {a}, Random: {r_mean:.2f}% ± {r_std:.2f}%, Optimized: {o_mean:.2f}% ± {o_std:.2f}%, KMeans: {k_mean:.2f}% ± {k_std:.2f}%")
+
+    # --- Save results to CSV ---
     csv_file = os.path.join(current_path, f"gred_vs_rand_dec_{decoder_transformer}_enc_{zero_shot_transformer}.csv")
     with open(csv_file, mode="w", newline="") as f:
         writer = csv.writer(f)
-        writer.writerow(["Anchors", "Random_mean", "Random_std", "Optimized_mean", "Optimized_std"])
-        for a, r_mean, r_std, o_mean, o_std in zip(anchor_nums_arr, random_means, random_stds, optimized_means, optimized_stds):
-            writer.writerow([a, r_mean, r_std, o_mean, o_std])
+        writer.writerow(["Anchors", "Random_mean", "Random_std", "Optimized_mean", "Optimized_std", "KMeans_mean", "KMeans_std"])
+        for a, r_mean, r_std, o_mean, o_std, k_mean, k_std in zip(anchor_nums_arr, random_means, random_stds, optimized_means, optimized_stds, kmeans_means, kmeans_stds):
+            writer.writerow([a, r_mean, r_std, o_mean, o_std, k_mean, k_std])
     print(f"Results saved to {csv_file}")
-    
+
     # --- Plot the results ---
     plt.figure()
     plt.plot(anchor_nums_arr, random_means, label="Random (cosine)", marker='o')
     plt.fill_between(anchor_nums_arr,
-                     np.array(random_means) - np.array(random_stds),
-                     np.array(random_means) + np.array(random_stds),
-                     alpha=0.2)
+                    np.array(random_means) - np.array(random_stds),
+                    np.array(random_means) + np.array(random_stds),
+                    alpha=0.2)
     plt.plot(anchor_nums_arr, optimized_means, label="Optimized (mahalanobis)", marker='o')
     plt.fill_between(anchor_nums_arr,
-                     np.array(optimized_means) - np.array(optimized_stds),
-                     np.array(optimized_means) + np.array(optimized_stds),
-                     alpha=0.2)
+                    np.array(optimized_means) - np.array(optimized_stds),
+                    np.array(optimized_means) + np.array(optimized_stds),
+                    alpha=0.2)
+    plt.plot(anchor_nums_arr, kmeans_means, label="KMeans (mahalanobis)", marker='o')
+    plt.fill_between(anchor_nums_arr,
+                    np.array(kmeans_means) - np.array(kmeans_stds),
+                    np.array(kmeans_means) + np.array(kmeans_stds),
+                    alpha=0.2)
     plt.xlabel("Number of Anchors")
     plt.ylabel("F1 Score (%)")
     plt.title("Relative Decoder Performance vs Number of Anchors")
     plt.legend()
     plt.grid(True)
     plt.show()
+
 
 if __name__ == "__main__":
     main()

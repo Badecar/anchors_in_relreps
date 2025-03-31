@@ -2,6 +2,37 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from scipy.optimize import minimize
+from tqdm import tqdm
+
+def optimize_weights(center, candidates, lambda_reg=0.1):
+    """
+    Optimize weights so that a weighted combination of candidate points approximates the center
+    with an entropy-like regularization.
+    
+    Args:
+      center: numpy array of shape [D,]
+      candidates: numpy array of shape [n_closest, D]
+      lambda_reg: regularization coefficient.
+    
+    Returns:
+      weights: numpy array of shape [n_closest,]
+    """
+    n = candidates.shape[0]
+    epsilon = 1e-8
+    def objective(w):
+        reconstruction_error = np.linalg.norm(np.dot(w, candidates) - center)**2
+        # KL divergence with uniform distribution (ideal weight = 1/n)
+        kl = np.sum(w * np.log(w * n + epsilon))
+        return reconstruction_error + lambda_reg * kl
+    cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
+    bounds = [(0, None)] * n
+    w0 = np.ones(n) / n
+    res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
+    if res.success:
+        return res.x
+    else:
+        return w0
 
 def compute_covariance_matrix(embeddings):
     """
@@ -148,7 +179,7 @@ def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_siz
             a_batch = anchors[i:end_i]   # shape: (B1, D)
             b_batch = anchors[j:end_j]   # shape: (B2, D)
             diff = a_batch.unsqueeze(1) - b_batch.unsqueeze(0)  # (B1, B2, D)
-            dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8)
+            dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8) # Dont save cov matrix in grad
             total_loss += torch.sum(dists ** exponent)
             count += dists.numel()
     if count == 0:
@@ -235,3 +266,68 @@ def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
     
     return anchor_selector, P_anchors_list
 
+def get_P_anchors_clustered(emb, anchor_num, n_closest=20, lambda_reg=0.1, epochs=50, lr=1e-1,
+                            coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1,
+                            dist_measure="cosine", verbose=True, device='cpu'):
+    """
+    Trains an AnchorSelector on the first embedding in emb and then refines its anchors
+    similarly to KMeans clusters.
+    
+    Steps:
+      1. Train the anchor selector on the first embedding.
+      2. Compute the initial anchors for the first embedding.
+      3. For each anchor (cluster center), find the n_closest datapoints (Euclidean) in the first embedding,
+         and recompute the anchor as a weighted average using optimized weights.
+      4. For every embedding in emb, compute refined anchors using the same candidate indices and weights.
+    
+    Args:
+      emb (list of numpy arrays): each array is of shape [N, D].
+      anchor_num (int): number of anchors.
+      n_closest (int): number of candidate datapoints per anchor.
+      lambda_reg (float): regularization for optimize_weights.
+      epochs, lr, coverage_weight, diversity_weight, anti_collapse_w, exponent, dist_measure, verbose, device:
+         parameters passed to get_optimized_anchors.
+    
+    Returns:
+      anchor_selector: the trained AnchorSelector.
+      P_anchors_list: list of refined anchors (each as a numpy array of shape [anchor_num, D]) for each embedding.
+      clusters_info: list of tuples for each anchor: (candidate_indices, weights, refined_anchor)
+    """
+    # Train anchor selector on the first embedding
+    X_first = emb[0]
+    X_first_tensor = torch.from_numpy(X_first).to(device)
+    anchor_selector, _ = get_optimized_anchors(emb=[X_first], anchor_num=anchor_num, epochs=epochs, lr=lr,
+                                               coverage_weight=coverage_weight, diversity_weight=diversity_weight,
+                                               anti_collapse_w=anti_collapse_w, exponent=exponent,
+                                               dist_measure=dist_measure, verbose=verbose, device=device)
+    # Compute initial anchors from the trained selector on the first embedding
+    initial_anchors = anchor_selector(X_first_tensor)  # shape: [anchor_num, D]
+    initial_anchors_np = initial_anchors.cpu().detach().numpy()
+
+    clusters_info = []
+    refined_anchors_first = []
+    # For each anchor, find its nearest n_closest points and refine the anchor.
+    for i in tqdm(range(anchor_num), desc="Refining Anchors"):
+        anchor_center = initial_anchors_np[i]
+        # Compute Euclidean distances from anchor_center to all datapoints in X_first
+        dists = np.linalg.norm(X_first - anchor_center, axis=1)
+        candidate_indices = np.argsort(dists)[:n_closest]
+        candidate_points = X_first[candidate_indices]
+        weights = optimize_weights(anchor_center, candidate_points, lambda_reg=lambda_reg)
+        refined_anchor = np.average(candidate_points, axis=0, weights=weights)
+        clusters_info.append((candidate_indices, weights, refined_anchor))
+        refined_anchors_first.append(refined_anchor)
+    refined_anchors_first = np.vstack(refined_anchors_first)  # shape: [anchor_num, D]
+    
+    # For each embedding in emb, compute refined anchors using the same candidate indices and weights
+    P_anchors_list = []
+    for X in emb:
+        refined_anchors = []
+        for candidate_indices, weights, _ in clusters_info:
+            candidate_points = X[candidate_indices]
+            refined_anchor = np.average(candidate_points, axis=0, weights=weights)
+            refined_anchors.append(refined_anchor)
+        refined_anchors = np.vstack(refined_anchors)
+        P_anchors_list.append(refined_anchors)
+    
+    return anchor_selector, P_anchors_list, clusters_info

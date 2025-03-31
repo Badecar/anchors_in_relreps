@@ -75,7 +75,7 @@ small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_data
     emb_list,
     idx_list,
     labels_list,
-    samples_per_class=400
+    samples_per_class=200
 )
 if use_small_dataset: emb_list, idx_list, labels_list = small_dataset_emb, small_dataset_idx, small_dataset_labels
 
