@@ -6,5 +6,6 @@ __all__ = [
     'compute_relative_coordinates_euclidean',
     'compare_latent_spaces',
     'encode_relative_by_index',
+    'compute_relative_coordinates_mahalanobis'
     'compute_relative_coordinates_cossim_non_normal',
     ]

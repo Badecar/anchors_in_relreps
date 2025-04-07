@@ -8,9 +8,9 @@ from visualization import *
 from anchors import *
 from relreps import *
 from zero_shot import *
+import numpy as np
 
-# For reproducibility and consistency across runs, we set a seed
-set_random_seeds(43)
+set_random_seeds(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
@@ -22,23 +22,24 @@ loader = val_loader
 use_small_dataset = False # Must be false if zero-shot
 
 ### PARAMETERS ###
-model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder
-load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
-save_run = False        # Save embeddings from current run
-dim = 32         # If load_saved: Must match an existing dim
-anchor_num = dim
-nr_runs = 3            # If load_saved: Must be <= number of saved runs for the dim
-hidden_layer = (32, 64, 128) # Use (128, 256, 512) for 100 dim, (64, 128, 256, 512) for 20 & 50 dim
+model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
+load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
+save_run = True        # Save embeddings from current run
+dim = 20         # If load_saved: Must match an existing dim
+anchor_num = dim + 5
+nr_runs = 7            # If load_saved: Must be <= number of saved runs for the dim
+hidden_layer = (32, 64) # (32, 64) or 128
 
 # Hyperparameters for anchor selection
-coverage_w = 0.90 # Coverage of embeddings
+coverage_w = 0.9 # Coverage of embeddings
 diversity_w = 1 - coverage_w # Pairwise between anchors
+anti_collapse_w = 0
 exponent = 1
 
 # Post-processing
-zero_shot = True
-plot_embeddings = True
-compute_mrr = True      # Only set true if you have >32GB of RAM, and very low dim
+zero_shot = False
+plot_embeddings = False
+compute_mrr = True      # Only set true if you have >32GB of RAM
 compute_similarity = True
 ### ###
 
@@ -74,7 +75,7 @@ small_dataset_emb, small_dataset_idx, small_dataset_labels = create_smaller_data
     emb_list,
     idx_list,
     labels_list,
-    samples_per_class=400
+    samples_per_class=200
 )
 if use_small_dataset: emb_list, idx_list, labels_list = small_dataset_emb, small_dataset_idx, small_dataset_labels
 
@@ -84,26 +85,30 @@ rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_
 
 # TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # TODO: Check the loss of this, is it converging, or do we need to fix the weights?
-# TODO: Currently we are only optimizing with euclidian. We should also implement cossim
+# TODO: Currently we are only optimizing with euclidean. We should also implement cossim
 # TODO: Compare P with the for loop greedy anchor search
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list = get_optimized_anchors(
-    emb = small_dataset_emb,
+    emb = emb_list,
     anchor_num=anchor_num,
     epochs=200,
-    lr=1e-1,
+    lr=1e-3,
     coverage_weight=coverage_w,
     diversity_weight=diversity_w,
+    anti_collapse_w=anti_collapse_w,
     exponent=exponent,
-    verbose=True,
+    dist_measure="euclidean", ## "euclidean", "mahalanobis", "cosine"
+    verbose=False,
     device=device,
 )
-anch_list = rand_anchors_list
+
+# Computing kmeans anchors
+kmeans_anchors_list, _ = get_kmeans_based_anchors(emb_list, idx_list, anchor_num, n_closest=100, kmeans_seed=42)
+
+anch_list = kmeans_anchors_list # P_anchors_list, rand_anchors_list, kmeans_anchors_list
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list)
-
-# visualize_reconstruction_by_id(idx_list[0][1], model_list[0], loader, device)
+relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)
 
 ### ZERO-SHOT STITCHING ###
 # NOTE: Decoder seems to work fine, but the relreps are hindering the performance
@@ -118,7 +123,7 @@ if zero_shot:
         loader=loader,
         nr_runs=nr_runs,
         device=device,
-        show=True,
+        show=False,
         verbose=True
     )
 
@@ -138,4 +143,4 @@ if plot_embeddings:
 #   The eucl relreps are only in the first quadrant, so cosine sim will be higher
 ### Relrep similarity and loss calculations ###
 if compute_similarity:
-    compare_latent_spaces(relrep_list, small_dataset_idx, compute_mrr=compute_mrr, verbose=False)
+    compare_latent_spaces(relrep_list, idx_list, compute_mrr=compute_mrr, verbose=False)
