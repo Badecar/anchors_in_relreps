@@ -45,7 +45,7 @@ coverage_w = 10
 diversity_w = 1
 exponent = 1
 
-def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device="cuda", use_small=True):
+def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device="cuda", use_small=True, relrep_dist="euclidean"):
     abs = []
     labels_list = []
     anchor_ids = []
@@ -55,7 +55,7 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
     for i in tqdm(range(grid_size), desc="creating embeddings"):
         set_random_seeds(seed+i)
         AE_list, embeddings_list, indices, labels, train_loss, test_loss, acc_list = train_AE(
-            model=AE_conv_MNIST,
+            model=AE_conv,
             num_epochs=num_epochs,
             batch_size=256,
             lr=1e-3,
@@ -132,7 +132,13 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
     # quit()
     rel_reps = []
     for embeddings, anchors_row in tqdm(zip(abs, anchors), desc="computing rel reps"):
-        temp_rel_reps_row = compute_relative_coordinates_euclidean([embeddings]*len(anchors_row), anchors_row)
+        if relrep_dist == "euclidean":
+            temp_rel_reps_row = compute_relative_coordinates_euclidean([embeddings]*len(anchors_row), anchors_row)
+        if relrep_dist == "cossim":
+            temp_rel_reps_row = compute_relative_coordinates_cossim([embeddings]*len(anchors_row), anchors_row)
+        if relrep_dist == "cossim_non_norm":
+            temp_rel_reps_row = compute_relative_coordinates_cossim_non_normal([embeddings]*len(anchors_row), anchors_row)
+        
         rel_reps.append(temp_rel_reps_row)
     return rel_reps, abs, labels_list, anchors
 
@@ -204,16 +210,10 @@ def plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=True, save=
     if show:
         plt.show()
     if save:
-        plt.savefig(f"visualization/saved_fig_{anchor_algo}")
+        plt.savefig(f"visualization/saved_fig_{anchor_algo}_temp_name")
 
 anchor_algo="random"
-rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
-plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
-
-anchor_algo="greedy"
-rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
-plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
-
-anchor_algo="p"
-rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device)
+# rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device, relrep_dist="cossim")
+# plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
+rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device, relrep_dist="cossim_non_norm")
 plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)

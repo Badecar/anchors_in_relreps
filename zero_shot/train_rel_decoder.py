@@ -27,11 +27,12 @@ def train_rel_decoder(epochs, hidden_dims, rel_model, model_list, relrep_list, i
             - val_losses (list): A list of validation losses recorded during the training process.
     """
     
-
-    print("Performing zero-shot stitching")
+    if verbose:
+        print("Performing zero-shot stitching")
     # 1. Regular autoencoder validation on the first AE
     mse_reg, mse_std_reg = model_list[0].validate(loader, device=device)
-    print("Regular AE Validation MSE: {:.5f} ± {:.5f}".format(mse_reg, mse_std_reg))
+    if verbose:
+        print("Regular AE Validation MSE: {:.5f} ± {:.5f}".format(mse_reg, mse_std_reg))
 
     # 2. Train the relative decoder using the relative coordinates and the validation set
     first_relrep = torch.tensor(relrep_list[0])
@@ -46,7 +47,7 @@ def train_rel_decoder(epochs, hidden_dims, rel_model, model_list, relrep_list, i
             img = to_tensor(img)
         img_flat = img.view(-1)
         target_images.append(img_flat)
-
+    
     target_images = torch.stack(target_images, dim=0)
 
     # Sort the loader dataset by unique index to match the relrep order
