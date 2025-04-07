@@ -17,7 +17,7 @@ from relreps import *
 from zero_shot import *
 
 # For reproducibility and consistency across runs, we set a seed
-set_random_seeds(43)
+set_random_seeds(42)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")

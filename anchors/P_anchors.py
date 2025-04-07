@@ -20,7 +20,7 @@ class AnchorSelector(nn.Module):
         T = 0.05
         P = F.softmax(self.Q / T, dim=1)
         anchors = P @ X  # [N_anchors, D]
-        return anchors, P
+        return anchors
 
 # NOTE: Eucl
 # def diversity_loss(anchors, exponent=0.5, scale=1.0/np.sqrt(2)):
@@ -59,7 +59,7 @@ def coverage_loss(anchors, embeddings):
 
 def anti_collapse_loss(anchors):
     # return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
-    return torch.mean(torch.relu(1 - torch.norm(anchors, dim=1)))
+    return torch.mean(torch.relu(3 - torch.norm(anchors, dim=1)))
 
 
 def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, verbose=True):
@@ -81,11 +81,13 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
     """
     optimizer = torch.optim.Adam(anchor_selector.parameters(), lr=lr)
     for epoch in range(epochs):
-        anchors = anchor_selector(embeddings)
-        loss_cov = coverage_loss(anchors, embeddings)
-        loss_div = diversity_loss(anchors, exponent=exp)
-        loss = diversity_weight * loss_div + coverage_weight * loss_cov + anti_collapse_w * anti_collapse_loss(anchors)
-        optimizer.zero_grad()
+        loss = 0
+        for embedding in embeddings:
+            anchors = anchor_selector(embedding)
+            loss_cov = coverage_loss(anchors, embedding)
+            loss_div = diversity_loss(anchors, exponent=exp)
+            loss += (diversity_weight * loss_div + coverage_weight * loss_cov + anti_collapse_w * anti_collapse_loss(anchors))**2
+            optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         if verbose and epoch % 10 == 0:
@@ -105,9 +107,9 @@ def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
     if verbose:
       print("Optimizing P anchors...")
     # Optimize on the first run's embeddings
-    X_first = emb[0]
+    X_first = np.array(emb)
     X_first_tensor = torch.from_numpy(X_first).to(device)
-    anchor_selector = AnchorSelector(N=X_first_tensor.shape[0], N_anchors=anchor_num).to(device)
+    anchor_selector = AnchorSelector(N=X_first_tensor.shape[1], N_anchors=anchor_num).to(device)
     optimize_anchors(anchor_selector, X_first_tensor, epochs=epochs, lr=lr,
                      coverage_weight=coverage_weight, diversity_weight=diversity_weight, anti_collapse_w=anti_collapse_w,
                      exp=exponent, verbose=verbose)
