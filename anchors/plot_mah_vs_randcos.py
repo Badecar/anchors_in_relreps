@@ -202,7 +202,7 @@ def main():
     batch_size = 64
     num_epochs = 9
     n_closest = 20 # number of closest points to each KMeans or P center
-    n_seeds = 7  # seeds per anchor configuration
+    n_seeds = 1  # seeds per anchor configuration
 
     anchor_nums = list(range(300, 601, 50))
 
@@ -295,7 +295,7 @@ def main():
             coverage_w = 1
             diversity_w = 1 - coverage_w
             anti_collapse_w = 0
-            clusterd_P_anchors = True
+            clusterd_P_anchors = False
             
             if clusterd_P_anchors:
                 _, P_anchors, _ = get_P_anchors_clustered(
@@ -322,8 +322,8 @@ def main():
                     diversity_weight=diversity_w,
                     anti_collapse_w=anti_collapse_w,
                     exponent=1,
-                    dist_measure="euclidean",
-                    verbose=False,
+                    dist_measure="mahalanobis",
+                    verbose=True,
                     device=device
                 )
             
