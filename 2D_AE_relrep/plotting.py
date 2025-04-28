@@ -38,7 +38,7 @@ anchor_num = 2
 repetitions = 10
 nr_runs = 3
 num_epochs = 10
-anchor_algo = "p" # can be "random", "greedy", "p"
+anchor_algo = "random" # can be "random", "greedy", "p"
 
 # Hyperparameters for anchor selection
 coverage_w = 1

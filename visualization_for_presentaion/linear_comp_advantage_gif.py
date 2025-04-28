@@ -11,11 +11,11 @@ black_points = black_points - np.mean(black_points, axis=0)
 red_points    = np.array([[ 1,  1],
                           [-1, -1]])
 n_frames      = 100            # number of frames in the animation
-output_gif    = 'linear_comp_advantage.gif'
+output_gif    = 'visualization_for_presentaion/linear_comp_advantage.gif'
 fps           = 20
 
 # Create a directory for frame images
-frames_dir = 'gif_frames'
+frames_dir = 'visualization_for_presentaion/gif_frames'
 os.makedirs(frames_dir, exist_ok=True)
 frame_paths = []
 
@@ -40,14 +40,15 @@ for i, s in tqdm(enumerate(frames_list), desc="generating frames"):
     
     # Plot
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(s[:, 0], s[:, 1], marker='x', label='Black points')
+    ax.scatter(s[:, 0], s[:, 1], s=20, label='datapoints')
     red_point = np.mean(s, axis=0)
     
     ax.axhline(0, color='grey', linewidth=1)
     ax.axvline(0, color='grey', linewidth=1)
-    ax.scatter(red_point[0],   red_point[1],   c='red', s=80, label='Red points (scaled)')
+    ax.scatter(red_point[0],   red_point[1],   c='red', s=80, label='linear combination of datapoints')
     
     ax.set_aspect('equal', 'box')
+    ax.legend(loc="upper left")
     ax.set_xlim(-2.5, 2.5)
     ax.set_ylim(-2.5, 2.5)
     ax.set_xticks([-2, -1, 0, 1, 2])
@@ -66,6 +67,5 @@ imageio.mimsave(output_gif, frames, fps=fps, loop=0)
 # === Cleanup frames directory (optional) ===
 for fp in frame_paths:
     os.remove(fp)
-os.rmdir(frames_dir)
 
 print(f"GIF written to {output_gif}")

@@ -30,7 +30,7 @@ black_points = np.random.randn(1000, 2).astype(np.float32)
 black_points = black_points - np.mean(black_points, axis=0)
 red_points    = black_points[np.random.choice(np.arange(len(black_points)), 10)]
 
-n_frames      = 100            # number of frames in the animation
+n_frames      = 150            # number of frames in the animation
 output_gif    = 'visualization_for_presentaion/animation_P.gif'
 fps           = 20
 
@@ -69,7 +69,7 @@ for i, s in tqdm(enumerate(anchors_list), desc="generating frames"):
     
     # Plot
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(black_points[:, 0], black_points[:, 1], s=40, c="black")
+    ax.scatter(black_points[:, 0], black_points[:, 1], s=20)
     
     ax.axhline(0, color='grey', linewidth=1)
     ax.axvline(0, color='grey', linewidth=1)
@@ -82,12 +82,23 @@ for i, s in tqdm(enumerate(anchors_list), desc="generating frames"):
     ax.set_ylim(-3.5, 3.5)
     ax.set_xticks([-3, -2, -1, 0, 1, 2, 3])
     ax.set_yticks([-3, -2, -1, 0, 1, 2, 3])
+    if i == 99:
+        ax.set_title(f"epoch {i+1}")
+    else:
+        ax.set_title(f"epoch {i//20 * 20 + 1} - {(i//20 + 1) * 20}")
+
     
     # Save frame
     frame_path = os.path.join(frames_dir, f'frame_{i:03d}.png')
     fig.savefig(frame_path, dpi=80)
     plt.close(fig)
     frame_paths.append(frame_path)
+    if i == 99:
+        for _ in range(49):
+            frame_path = os.path.join(frames_dir, f'frame_{i+1+_:03d}.png')
+            fig.savefig(frame_path, dpi=80)
+            plt.close(fig)
+            frame_paths.append(frame_path)
 
 # === Combine frames into a GIF ===
 frames = [imageio.imread(fp) for fp in frame_paths]

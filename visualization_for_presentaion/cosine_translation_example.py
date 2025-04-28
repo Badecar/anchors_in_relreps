@@ -85,13 +85,13 @@ for i, (b, r) in tqdm(enumerate(zip(black_points_list, red_points_list)), desc="
     
     # Plot
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(b[:, 0], b[:, 1], marker='x', label='Black points')
+    ax.scatter(b[:, 0], b[:, 1], s=20, label='Black points')
     red_point = np.mean(b, axis=0)
     
     ax.axhline(0, color='grey', linewidth=1)
     ax.axvline(0, color='grey', linewidth=1)
     
-    ax.scatter(r[:, 0], r[:, 1], marker='x', label='Black points')
+    ax.scatter(r[:, 0], r[:, 1], s=20, label='Black points')
     for x, y in r:
         plt.arrow(0, 0, x, y,
                 head_width=0.05,
@@ -161,13 +161,12 @@ for i, (b, r) in tqdm(enumerate(zip(black_points_list, red_points_list)), desc="
     
     # Plot
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(b[:, 0], b[:, 1], marker='x', label='Black points')
-    red_point = np.mean(b, axis=0)
+    ax.scatter(b[:, 0], b[:, 1], s=20, label='Black points')
     
     ax.axhline(0, color='grey', linewidth=1)
     ax.axvline(0, color='grey', linewidth=1)
     
-    ax.scatter(r[:, 0], r[:, 1], marker='x', label='Black points')
+    ax.scatter(r[:, 0], r[:, 1], s=40, label='Black points')
     for x, y in r:
         plt.arrow(0, 0, x, y,
                 head_width=0.05,

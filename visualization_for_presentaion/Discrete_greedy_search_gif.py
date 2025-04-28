@@ -21,12 +21,12 @@ black_points = np.random.randn(1000, 2)
 black_points = black_points - np.mean(black_points, axis=0)
 red_points    = np.array([[ 1,  1],
                           [-1, -1]])
-n_frames      = num_anchors*reps-1            # number of frames in the animation
-output_gif    = 'animation_greedy_search.gif'
+n_frames      = 15            # number of frames in the animation
+output_gif    = 'visualization_for_presentaion/animation_greedy_search.gif'
 fps           = 1
 
 # Create a directory for frame images
-frames_dir = 'gif_frames'
+frames_dir = 'visualization_for_presentaion/gif_frames'
 os.makedirs(frames_dir, exist_ok=True)
 frame_paths = []
 
@@ -107,7 +107,7 @@ for i, s in tqdm(enumerate(anchors_list_for_plot), desc="generating frames"):
     
     # Plot
     fig, ax = plt.subplots(figsize=(6, 6))
-    ax.scatter(black_points[:, 0], black_points[:, 1], marker='x', label='Black points')
+    ax.scatter(black_points[:, 0], black_points[:, 1], s=20, label='Black points')
     red_point = np.mean(s, axis=0)
     
     ax.axhline(0, color='grey', linewidth=1)
@@ -132,6 +132,7 @@ for i, s in tqdm(enumerate(anchors_list_for_plot), desc="generating frames"):
 
 # === Combine frames into a GIF ===
 frames = [imageio.imread(fp) for fp in frame_paths]
+print(len(frames))
 imageio.mimsave(output_gif, frames, fps=fps, loop=0)
 
 # === Cleanup frames directory (optional) ===

@@ -60,7 +60,7 @@ def train_AE(model, num_epochs=5, batch_size=256, lr=1e-3, device='cuda', latent
         lab = labels.cpu().numpy()
 
         embeddings_sorted, idx_sorted, labels_sorted = sort_results(emb, idx, lab)
-
+        print(len(idx_sorted), max(idx_sorted))
         # Appending results
         embeddings_list.append(embeddings_sorted)
         indices_list.append(idx_sorted)
