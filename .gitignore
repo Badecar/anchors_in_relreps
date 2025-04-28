@@ -1,3 +1,5 @@
 datasets/
 material.ipynb
 features_dict_CIFAR100_coarse.pt
+img_embeds.pt
+txt_embeds.pt
