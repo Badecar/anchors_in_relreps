@@ -41,8 +41,8 @@ num_epochs = 10
 anchor_algo = "p" # can be "random", "greedy", "p"
 
 # Hyperparameters for anchor selection
-coverage_w = 10
-diversity_w = 1
+coverage_w = 1
+diversity_w = 10
 exponent = 1
 
 def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device="cuda", use_small=True, relrep_dist="euclidean"):
@@ -64,7 +64,7 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
             hidden_layer=None,
             nr_runs=1,
             save=False,
-            verbose=True,
+            verbose=False,
             train_loader=train_loader,
             test_loader=test_loader
         )
@@ -84,19 +84,6 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
         # finding anchors depending on the chosen method
         if anchor_algo == "random":
             anchor_ids.append(random.sample(list(indices[0]), 2))
-        elif anchor_algo == "p":
-            anchor_selector, _ = get_optimized_anchors(
-                emb=[abs[-1]],
-                anchor_num=anchor_num,
-                epochs=50,
-                lr=1e-1,
-                coverage_weight=coverage_w,
-                diversity_weight=diversity_w,
-                exponent=exponent,
-                verbose=False,
-                device=device
-            )
-            anchor_selectors.append(anchor_selector)
 
     if anchor_algo == "greedy":
         for i in tqdm(range(nr_runs), desc="choosing anchors"):
@@ -104,6 +91,18 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
             anchor_ids.append(greedy_one_at_a_time_single_euclidean(abs, indices_list,
                                                                     num_anchors=anchor_num, repetitions=repetitions,
                                                                     diversity_weight=diversity_w, Coverage_weight=coverage_w, verbose=False))
+    elif anchor_algo == "p":
+        selector, _ = get_optimized_anchors(
+            emb=abs, 
+            anchor_num=anchor_num,
+            epochs=200,
+            lr=1e-1,
+            coverage_weight=coverage_w,
+            diversity_weight=diversity_w,
+            exponent=exponent,
+            verbose=False,
+            device=device
+        )
         
     embeddings_list = [np.array(random.sample(embeddings.tolist(), 1000)) for embeddings in embeddings_list]
     anchors = []
@@ -118,18 +117,13 @@ def get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs,
     else:
         for embedding in tqdm(abs, desc="getting anchors"):
             row = []
-            for selector in anchor_selectors:
-                X = torch.from_numpy(embedding).to(device)
-                temp_anchor = selector(torch.tensor(X))
-                row.append(temp_anchor.cpu().detach().numpy())
+            X = torch.from_numpy(embedding).to(device)
+            temp_anchor = selector(torch.tensor(X))
+            row.append(temp_anchor.cpu().detach().numpy())
 
-            anchors.append(row)
+        anchors.append(row)
 
 
-    # print(anchor_ids)
-
-    # print(anchors)
-    # quit()
     rel_reps = []
     for embeddings, anchors_row in tqdm(zip(abs, anchors), desc="computing rel reps"):
         if relrep_dist == "euclidean":
@@ -216,4 +210,5 @@ anchor_algo="random"
 # rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device, relrep_dist="cossim")
 # plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
 rel_reps, abs, labels_list, anchors = get_relrep_grid(grid_size=3 ,anchor_algo=anchor_algo, num_epochs=num_epochs, train_loader=train_loader, test_loader=test_loader, device=device, relrep_dist="cossim_non_norm")
-plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=False, save=True)
+plot_grid(rel_reps, abs, labels_list, anchors, anchor_algo, show=True, save=False)
+

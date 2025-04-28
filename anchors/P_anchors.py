@@ -206,7 +206,7 @@ def diversity_loss_mahalanobis(anchors, inv_cov, exponent=1.0):
     return -torch.mean(dists ** exponent)
 
 # Batched version for Mahalanobis coverage loss.
-def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=1024):
+def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=2**16):
     total_loss = 0.0
     total_samples = 0
     for i in range(0, embeddings.size(0), batch_size):
@@ -221,7 +221,7 @@ def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=1
     return total_loss / total_samples
 
 # Batched version for Mahalanobis diversity loss.
-def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_size=256):
+def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_size=2**16):
     n = anchors.size(0)
     total_loss = 0.0
     count = 0
@@ -277,7 +277,7 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
             loss_div = diversity_loss_cossim(anchors, exponent=exp)
             anti_collapse_w = 0.0  # No anti-collapse loss needed for euclidean
         elif dist_measure == "mahalanobis":
-            inv_cov = torch.linalg.inv(compute_covariance_matrix(embeddings) + 1e-6 * torch.eye(embeddings.size(1), device=embeddings.device))
+            inv_cov = torch.linalg.inv(compute_covariance_matrix(embeddings) + 1e-6 * torch.eye(embeddings.size(1), device=embeddings.device)).detach()
             loss_cov = coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov)
             loss_div = diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=exp)
         else:
@@ -287,7 +287,7 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if verbose and epoch % 10 == 0:
+        if verbose and epoch % 1 == 0:
             print(f"Epoch {epoch:3d}: loss={loss.item():.7f}, weighted coverage={loss_cov.item()*coverage_weight:.7f}, weighted diversity={loss_div.item()*diversity_weight:.7f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
     return anchor_selector(embeddings)
 
