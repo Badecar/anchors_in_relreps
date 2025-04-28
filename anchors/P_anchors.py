@@ -4,35 +4,88 @@ import torch.nn.functional as F
 import numpy as np
 from scipy.optimize import minimize
 from tqdm import tqdm
+import torch
+import torch.optim as optim
 
-def optimize_weights(center, candidates, lambda_reg=0.1):
+def optimize_weights(center, candidates, lambda_reg=0.1, lr=1e-2, epochs=200, device="cuda"):
     """
-    Optimize weights so that a weighted combination of candidate points approximates the center
-    with an entropy-like regularization.
+    Optimize weights on GPU so that a weighted combination of candidate points approximates center.
+    The objective is:
+      ||sum_i w_i * candidate_i - center||² + lambda_reg * KL(w || uniform)
+    We enforce w_i >= 0 and sum_i w_i = 1 by representing the weights via softmax.
     
     Args:
-      center: numpy array of shape [D,]
-      candidates: numpy array of shape [n_closest, D]
-      lambda_reg: regularization coefficient.
+      center: torch.Tensor of shape (D,)
+      candidates: torch.Tensor of shape (n_candidates, D)
+      lambda_reg: float, regularization coefficient.
+      lr: learning rate
+      epochs: number of optimization steps
+      device: device string, e.g. "cuda" or "cpu"
     
     Returns:
-      weights: numpy array of shape [n_closest,]
+      weights: numpy array of shape (n_candidates,), representing the optimized weights.
     """
+    if not isinstance(center, torch.Tensor):
+        center = torch.from_numpy(np.array(center))
+    if not isinstance(candidates, torch.Tensor):
+        candidates = torch.from_numpy(np.array(candidates))
+    center = center.to(device)
+    candidates = candidates.to(device)
+    
     n = candidates.shape[0]
-    epsilon = 1e-8
-    def objective(w):
-        reconstruction_error = np.linalg.norm(np.dot(w, candidates) - center)**2
-        # KL divergence with uniform distribution (ideal weight = 1/n)
-        kl = np.sum(w * np.log(w * n + epsilon))
-        return reconstruction_error + lambda_reg * kl
-    cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-    bounds = [(0, None)] * n
-    w0 = np.ones(n) / n
-    res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
-    if res.success:
-        return res.x
-    else:
-        return w0
+    # We optimize an unconstrained parameter vector which will be normalized via softmax.
+    params = torch.zeros(n, device=device, requires_grad=True)
+    
+    optimizer = optim.Adam([params], lr=lr)
+    eps = 1e-8
+    
+    for epoch in range(epochs):
+        optimizer.zero_grad()
+        # Apply softmax to ensure positivity and unity sum.
+        w = torch.softmax(params, dim=0)
+        reconstruction = torch.matmul(w, candidates)
+        reconstruction_error = torch.norm(reconstruction - center) ** 2
+        
+        # Compute KL divergence with the uniform distribution (each weight ~ 1/n)
+        kl = torch.sum(w * torch.log(w * n + eps))
+        
+        loss = reconstruction_error + lambda_reg * kl
+        loss.backward()
+        optimizer.step()
+    
+    with torch.no_grad():
+        final_weights = torch.softmax(params, dim=0).cpu().numpy()
+    
+    return final_weights
+
+# def optimize_weights(center, candidates, lambda_reg=0.1):
+#     """
+#     Optimize weights so that a weighted combination of candidate points approximates the center
+#     with an entropy-like regularization.
+    
+#     Args:
+#       center: numpy array of shape [D,]
+#       candidates: numpy array of shape [n_closest, D]
+#       lambda_reg: regularization coefficient.
+    
+#     Returns:
+#       weights: numpy array of shape [n_closest,]
+#     """
+#     n = candidates.shape[0]
+#     epsilon = 1e-8
+#     def objective(w):
+#         reconstruction_error = np.linalg.norm(np.dot(w, candidates) - center)**2
+#         # KL divergence with uniform distribution (ideal weight = 1/n)
+#         kl = np.sum(w * np.log(w * n + epsilon))
+#         return reconstruction_error + lambda_reg * kl
+#     cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
+#     bounds = [(0, None)] * n
+#     w0 = np.ones(n) / n
+#     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
+#     if res.success:
+#         return res.x
+#     else:
+#         return w0
 
 def compute_covariance_matrix(embeddings):
     """

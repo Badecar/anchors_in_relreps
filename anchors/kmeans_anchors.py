@@ -3,47 +3,11 @@ import numpy as np
 from sklearn.cluster import KMeans
 from scipy.optimize import minimize
 from scipy.special import softmax
+from .P_anchors import optimize_weights
 
 import os
 # To get around warning
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
-
-def optimize_weights(center, candidates, lambda_reg=0.1):
-    """
-    Optimize weights so that a weighted combination of candidate points approximates center,
-    while promoting an approximately uniform weighting over candidates.
-
-    Solves:
-        minimize ||Σᵢ wᵢ·candidate_i – center||² + lambda_reg * KL(w||uniform)
-        subject to wᵢ >= 0 and sum(w) = 1.
-    
-    Args:
-      center: numpy array of shape [D,]
-      candidates: numpy array of shape [n_closest, D]
-      lambda_reg: regularization coefficient for the uniformity penalty.
-    
-    Returns:
-      weights: numpy array of shape [n_closest,]
-    """
-    n = candidates.shape[0]
-    epsilon = 1e-8  # to avoid log(0)
-    
-    def objective(w):
-        reconstruction_error = np.linalg.norm(np.dot(w, candidates) - center)**2
-        # KL divergence with uniform distribution.
-        # If uniform then each weight should be 1/n.
-        kl = np.sum(w * np.log(w * n + epsilon))
-        return reconstruction_error + lambda_reg * kl
-
-    # Constraint: weights sum to 1.
-    cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-    bounds = [(0, None)] * n
-    w0 = np.ones(n) / n
-    res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
-    if res.success:
-        return res.x
-    else:
-        return w0
 
 def get_kmeans_based_anchors(emb, idx_list, anchor_num, n_closest=20, kmeans_seed=42, verbose=False):
     """
