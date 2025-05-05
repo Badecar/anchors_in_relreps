@@ -121,21 +121,6 @@ class AnchorSelector(nn.Module):
         return anchors
 
 
-# class AnchorSelector(nn.Module):
-#   def __init__(self, N, N_anchors):
-#     super().__init__()
-#     # Raw parameters for anchors
-#     self.P = nn.Parameter(torch.randn(N_anchors, N))
-  
-#   def forward(self, X):
-#     """
-#     X: [N, D] embeddings.
-#     Returns:
-#       anchors: [N_anchors, D] computed as weighted combinations of X.
-#     """
-#     anchors = self.P @ X
-#     return anchors
-
 # NOTE: Eucl
 def diversity_loss_eucl(anchors, exponent=1.0, scale=1.0/np.sqrt(2)):
     pdist_vals = torch.pdist(anchors, p=2)
@@ -165,7 +150,6 @@ def coverage_loss_cossim(anchors, embeddings):
     sim = abs(emb_norm @ anchors_norm.t())
     min_dists, _ = torch.min(sim, dim=1)
     return -torch.mean(min_dists)
-
 
 #NOTE: Using Mahalanobis distance.
 def coverage_loss_mahalanobis(anchors, embeddings, inv_cov):
@@ -245,7 +229,7 @@ def anti_collapse_loss(anchors):
     return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
 
 def anchor_size_loss(anchors):
-   return torch.mean(torch.norm(anchors, dim=1))
+   return -torch.mean(torch.norm(anchors, dim=1))
 
 
 def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, dist_measure="cosine", verbose=True, device='cpu'):
@@ -282,14 +266,15 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
             loss_div = diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=exp)
         else:
             raise ValueError(f"dist_measure must be one of 'euclidean', 'cosine', or 'mahalanobis' but was {dist_measure}.")
-        loss = diversity_weight * loss_div + coverage_weight * loss_cov - anti_collapse_w * anchor_size_loss(anchors)
+        loss = diversity_weight * loss_div + coverage_weight * loss_cov + anti_collapse_w * anchor_size_loss(anchors)
 
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
-        if verbose and epoch % 1 == 0:
+        if verbose and epoch % 10 == 0:
             print(f"Epoch {epoch:3d}: loss={loss.item():.7f}, weighted coverage={loss_cov.item()*coverage_weight:.7f}, weighted diversity={loss_div.item()*diversity_weight:.7f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
     return anchor_selector(embeddings)
+
 
 def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
                           coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1, dist_measure="cosine", verbose=True, device='cpu'):

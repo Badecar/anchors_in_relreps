@@ -312,13 +312,8 @@ def main():
     train_perc = 1.0
     batch_size = 64
     num_epochs = 9
-<<<<<<< HEAD
     n_closest = 100 # number of closest points to each KMeans or P center
     n_seeds = 7  # seeds per anchor configuration
-=======
-    n_closest = 20 # number of closest points to each KMeans or P center
-    n_seeds = 1  # seeds per anchor configuration
->>>>>>> 80c1a30532a994ad1c208f078fa7f88565a4a1a5
 
     anchor_nums = list(range(100, 601, 50))
 
@@ -407,9 +402,8 @@ def main():
             coverage_w = 0.95
             diversity_w = 1 - coverage_w
             anti_collapse_w = 0
-            clusterd_P_anchors = False
+            clusterd_P_anchors = True
             
-<<<<<<< HEAD
             # if clusterd_P_anchors:
             #     _, P_anchors, _ = get_P_anchors_clustered(
             #         emb=emb_list,
@@ -439,37 +433,6 @@ def main():
             #         verbose=False,
             #         device=device
             #     )
-=======
-            if clusterd_P_anchors:
-                _, P_anchors, _ = get_P_anchors_clustered(
-                    emb=emb_list,
-                    anchor_num=num_anchors,
-                    n_closest=n_closest,
-                    epochs=200,
-                    lr=1e-2,
-                    coverage_weight=coverage_w,
-                    diversity_weight=diversity_w,
-                    anti_collapse_w=anti_collapse_w,
-                    exponent=1,
-                    dist_measure="euclidean",
-                    verbose=True,
-                    device=device
-                )
-            else:
-                _, P_anchors = get_optimized_anchors(
-                    emb=emb_list,
-                    anchor_num=num_anchors,
-                    epochs=200,
-                    lr=1e-2,
-                    coverage_weight=coverage_w,
-                    diversity_weight=diversity_w,
-                    anti_collapse_w=anti_collapse_w,
-                    exponent=1,
-                    dist_measure="mahalanobis",
-                    verbose=True,
-                    device=device
-                )
->>>>>>> 80c1a30532a994ad1c208f078fa7f88565a4a1a5
             
             # P_anchors_enc1, P_anchors_enc2 = P_anchors[0], P_anchors[1]
 

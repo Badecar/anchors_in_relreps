@@ -122,52 +122,6 @@ def get_kmeans_anchors_clustered(src_emb, tgt_emb, anchor_num, n_closest=20, kme
     
     return anchors_src, anchors_tgt, clusters_info
 
-def get_kmeans_anchors_unclustered(src_emb, tgt_emb, anchor_num, n_closest=2, kmeans_seed=42, verbose=False):
-    N = src_emb.shape[0]
-    global_idx = np.arange(N)
-    kmeans = KMeans(n_clusters=anchor_num, random_state=kmeans_seed)
-    kmeans.fit(src_emb)
-    centers = kmeans.cluster_centers_
-
-    candidate_lists = []
-    for center in centers:
-        dists = np.linalg.norm(src_emb - center, axis=1)
-        candidate_order = np.argsort(dists)[:n_closest]
-        candidate_lists.append(candidate_order)
-
-    clusters_info = []
-    anchors_src = []
-    anchors_tgt = []
-
-    closest_center_num = 20
-    for i, center in enumerate(tqdm(centers, desc="Processing clusters")):
-        center_dists = np.linalg.norm(centers - center, axis=1)
-        center_dists[i] = np.inf
-        closest_indices = np.argsort(center_dists)[:closest_center_num]
-        other_candidates = np.concatenate([candidate_lists[j] for j in closest_indices])
-        candidate_idxs = np.unique(other_candidates)
-        if candidate_idxs.size < n_closest:
-            print("Removed too many duplicates. Falling back to all global indices.")
-            candidate_idxs = global_idx
-        candidate_points = src_emb[candidate_idxs]
-        weights = optimize_weights(center, candidate_points, lambda_reg=0.40)
-        clusters_info.append((candidate_idxs, weights, center))
-        anchor_src = np.average(src_emb[candidate_idxs], axis=0, weights=weights)
-        anchor_tgt = np.average(tgt_emb[candidate_idxs], axis=0, weights=weights)
-        anchors_src.append(anchor_src)
-        anchors_tgt.append(anchor_tgt)
-
-    anchors_src = np.vstack(anchors_src)
-    anchors_tgt = np.vstack(anchors_tgt)
-
-    if verbose:
-        print("KMeans centers (first):", centers[0])
-        print("First cluster candidate indices:", clusters_info[0][0])
-        print("First approximated anchor (src):", anchors_src[0])
-        print("First approximated anchor (tgt):", anchors_tgt[0])
-
-    return anchors_src, anchors_tgt, clusters_info
-
 def build_classifier(input_dim, intermediate_dim, num_classes, dropout_p=0.5):
     return nn.Sequential(
         nn.LayerNorm(input_dim),
@@ -200,8 +154,7 @@ def train_classifier(classifier, train_feats, train_labels, device, num_epochs=7
         print(f"  Epoch {epoch+1}/{num_epochs}, Loss: {avg_loss:.4f}")
     return classifier
 
-# Modify get_dataset to accept a dataset_name parameter
-def get_dataset(split, perc=1.0, dataset_name="cifar100"):
+def get_dataset(split, perc=1.0, dataset_name="CIFAR100_coarse"):
     if dataset_name.lower() == "imagenet1k":
         dataset = load_dataset("imagenet-1k", split=split, trust_remote_code=True)
     else:
@@ -213,8 +166,7 @@ def get_dataset(split, perc=1.0, dataset_name="cifar100"):
         dataset = dataset.select(indices)
     return dataset
 
-# Modify collate_fn to account for different image and label keys
-def collate_fn(batch, transform, dataset_name="cifar100"):
+def collate_fn(batch, transform, dataset_name="CIFAR100_coarse"):
     if dataset_name.lower() == "imagenet1k":
         images = [transform(sample["image"]) for sample in batch]
         labels = [sample["label"] for sample in batch]
@@ -225,7 +177,6 @@ def collate_fn(batch, transform, dataset_name="cifar100"):
     labels = torch.tensor(labels)
     return images, labels
 
-# Update run_experiment to pass the dataset_name and adjust num_classes
 def run_experiment(dist_metric, dataset_name="cifar100"):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     train_perc = 1.0
@@ -312,99 +263,99 @@ def run_experiment(dist_metric, dataset_name="cifar100"):
             sample_count = enc1_feats_train.shape[0]
             random_indices = np.sort(np.random.choice(sample_count, num_anchors, replace=False))
 
-            # # --- RANDOM ANCHORS ---
-            # anchors_random_train = enc1_feats_train[random_indices].to(device)
-            # if dist_metric == "cosine":
-            #     rel_train_random = relative_projection_cosine(enc1_feats_train.to(device), anchors_random_train)
-            # elif dist_metric == "euclidean":
-            #     rel_train_random = relative_projection_euclidean(enc1_feats_train.to(device), anchors_random_train)
-            # elif dist_metric == "mahalanobis":
-            #     cov_train = compute_covariance_matrix(enc1_feats_train.to(device))
-            #     inv_cov_train = torch.linalg.inv(cov_train + 1e-6 * torch.eye(cov_train.size(0), device=cov_train.device))
-            #     rel_train_random = relative_projection_mahalanobis_batched(enc1_feats_train.to(device), anchors_random_train, inv_cov_train)
+            # --- RANDOM ANCHORS ---
+            anchors_random_train = enc1_feats_train[random_indices].to(device)
+            if dist_metric == "cosine":
+                rel_train_random = relative_projection_cosine(enc1_feats_train.to(device), anchors_random_train)
+            elif dist_metric == "euclidean":
+                rel_train_random = relative_projection_euclidean(enc1_feats_train.to(device), anchors_random_train)
+            elif dist_metric == "mahalanobis":
+                cov_train = compute_covariance_matrix(enc1_feats_train.to(device))
+                inv_cov_train = torch.linalg.inv(cov_train + 1e-6 * torch.eye(cov_train.size(0), device=cov_train.device))
+                rel_train_random = relative_projection_mahalanobis_batched(enc1_feats_train.to(device), anchors_random_train, inv_cov_train)
             
-            # # --- P OPTIMIZED ANCHORS ---
-            # coverage_w = 0.95
-            # diversity_w = 1 - coverage_w
-            # anti_collapse_w = 0
-            # clusterd_P_anchors = False
-            # optimize_distmeasure = "euclidean" if dist_metric != "cosine" else "cosine"
-            # if clusterd_P_anchors:
-            #     _, P_anchors, _ = get_P_anchors_clustered(
-            #         emb=emb_list,
-            #         anchor_num=num_anchors,
-            #         n_closest=n_closest,
-            #         epochs=200,
-            #         lr=1e-2,
-            #         coverage_weight=coverage_w,
-            #         diversity_weight=diversity_w,
-            #         anti_collapse_w=anti_collapse_w,
-            #         exponent=1,
-            #         dist_measure=optimize_distmeasure,  # use euclidean for P optimization routine
-            #         verbose=True,
-            #         device=device
-            #     )
-            # else:
-            #     _, P_anchors = get_optimized_anchors(
-            #         emb=emb_list,
-            #         anchor_num=num_anchors,
-            #         epochs=200,
-            #         lr=1e-2,
-            #         coverage_weight=coverage_w,
-            #         diversity_weight=diversity_w,
-            #         anti_collapse_w=anti_collapse_w,
-            #         exponent=1,
-            #         dist_measure=optimize_distmeasure,
-            #         verbose=False,
-            #         device=device
-            #     )
-            # P_anchors_enc1, P_anchors_enc2 = P_anchors[0], P_anchors[1]
+            # --- P OPTIMIZED ANCHORS ---
+            coverage_w = 0.95
+            diversity_w = 1 - coverage_w
+            anti_collapse_w = 0
+            clusterd_P_anchors = False
+            optimize_distmeasure = "euclidean" if dist_metric != "cosine" else "cosine"
+            if clusterd_P_anchors:
+                _, P_anchors, _ = get_P_anchors_clustered(
+                    emb=emb_list,
+                    anchor_num=num_anchors,
+                    n_closest=n_closest,
+                    epochs=200,
+                    lr=1e-2,
+                    coverage_weight=coverage_w,
+                    diversity_weight=diversity_w,
+                    anti_collapse_w=anti_collapse_w,
+                    exponent=1,
+                    dist_measure=optimize_distmeasure,  # use euclidean for P optimization routine
+                    verbose=True,
+                    device=device
+                )
+            else:
+                _, P_anchors = get_optimized_anchors(
+                    emb=emb_list,
+                    anchor_num=num_anchors,
+                    epochs=200,
+                    lr=1e-2,
+                    coverage_weight=coverage_w,
+                    diversity_weight=diversity_w,
+                    anti_collapse_w=anti_collapse_w,
+                    exponent=1,
+                    dist_measure=optimize_distmeasure,
+                    verbose=True,
+                    device=device
+                )
+            P_anchors_enc1, P_anchors_enc2 = P_anchors[0], P_anchors[1]
 
     
-            # if dist_metric == "cosine":
-            #     rel_train_optimized = relative_projection_cosine(enc1_feats_train.to(device), P_anchors_enc1)
-            # elif dist_metric == "euclidean":
-            #     rel_train_optimized = relative_projection_euclidean(enc1_feats_train.to(device), P_anchors_enc1)
-            # elif dist_metric == "mahalanobis":
-            #     cov_train = compute_covariance_matrix(enc1_feats_train.to(device))
-            #     inv_cov_train = torch.linalg.inv(cov_train + 1e-6 * torch.eye(cov_train.size(0), device=cov_train.device))
-            #     rel_train_optimized = relative_projection_mahalanobis_batched(enc1_feats_train.to(device), P_anchors_enc1, inv_cov_train)
+            if dist_metric == "cosine":
+                rel_train_optimized = relative_projection_cosine(enc1_feats_train.to(device), P_anchors_enc1)
+            elif dist_metric == "euclidean":
+                rel_train_optimized = relative_projection_euclidean(enc1_feats_train.to(device), P_anchors_enc1)
+            elif dist_metric == "mahalanobis":
+                cov_train = compute_covariance_matrix(enc1_feats_train.to(device))
+                inv_cov_train = torch.linalg.inv(cov_train + 1e-6 * torch.eye(cov_train.size(0), device=cov_train.device))
+                rel_train_optimized = relative_projection_mahalanobis_batched(enc1_feats_train.to(device), P_anchors_enc1, inv_cov_train)
 
-            # # Train classifiers on the relative representations.
-            # clf_random = build_classifier(num_anchors, num_anchors, num_classes).to(device)
-            # clf_optimized = build_classifier(num_anchors, num_anchors, num_classes).to(device)
-            # print(" Training Random relative decoder:")
-            # clf_random = train_classifier(clf_random, rel_train_random, enc1_labels_train.to(device),
-            #                               device, num_epochs=num_epochs)
-            # print(" Training Optimized relative decoder:")
-            # clf_optimized = train_classifier(clf_optimized, rel_train_optimized, enc1_labels_train.to(device),
-            #                                  device, num_epochs=num_epochs)
+            # Train classifiers on the relative representations.
+            clf_random = build_classifier(num_anchors, num_anchors, num_classes).to(device)
+            clf_optimized = build_classifier(num_anchors, num_anchors, num_classes).to(device)
+            print(" Training Random relative decoder:")
+            clf_random = train_classifier(clf_random, rel_train_random, enc1_labels_train.to(device),
+                                          device, num_epochs=num_epochs)
+            print(" Training Optimized relative decoder:")
+            clf_optimized = train_classifier(clf_optimized, rel_train_optimized, enc1_labels_train.to(device),
+                                             device, num_epochs=num_epochs)
             
-            # # --- TEST PHASE on enc2 features ---
-            # anchors_random_test = enc2_feats_train[random_indices].to(device)
-            # if dist_metric == "cosine":
-            #     rel_test_random = relative_projection_cosine(enc2_feats_test.to(device), anchors_random_test)
-            # elif dist_metric == "euclidean":
-            #     rel_test_random = relative_projection_euclidean(enc2_feats_test.to(device), anchors_random_test)
-            # elif dist_metric == "mahalanobis":
-            #     cov_test = compute_covariance_matrix(enc2_feats_train.to(device))
-            #     inv_cov_test = torch.linalg.inv(cov_test + 1e-6 * torch.eye(cov_test.size(0), device=cov_test.device))
-            #     rel_test_random = relative_projection_mahalanobis_batched(enc2_feats_test.to(device), anchors_random_test, inv_cov_test)
-            # f1_random = evaluate_classifier(clf_random, rel_test_random, enc2_labels_test.to(device), device)
+            # --- TEST PHASE on enc2 features ---
+            anchors_random_test = enc2_feats_train[random_indices].to(device)
+            if dist_metric == "cosine":
+                rel_test_random = relative_projection_cosine(enc2_feats_test.to(device), anchors_random_test)
+            elif dist_metric == "euclidean":
+                rel_test_random = relative_projection_euclidean(enc2_feats_test.to(device), anchors_random_test)
+            elif dist_metric == "mahalanobis":
+                cov_test = compute_covariance_matrix(enc2_feats_train.to(device))
+                inv_cov_test = torch.linalg.inv(cov_test + 1e-6 * torch.eye(cov_test.size(0), device=cov_test.device))
+                rel_test_random = relative_projection_mahalanobis_batched(enc2_feats_test.to(device), anchors_random_test, inv_cov_test)
+            f1_random = evaluate_classifier(clf_random, rel_test_random, enc2_labels_test.to(device), device)
             
-            # if dist_metric == "cosine":
-            #     rel_test_optimized = relative_projection_cosine(enc2_feats_test.to(device), P_anchors_enc2)
-            # elif dist_metric == "euclidean":
-            #     rel_test_optimized = relative_projection_euclidean(enc2_feats_test.to(device), P_anchors_enc2)
-            # elif dist_metric == "mahalanobis":
-            #     cov_test = compute_covariance_matrix(enc2_feats_train.to(device))
-            #     inv_cov_test = torch.linalg.inv(cov_test + 1e-6 * torch.eye(cov_test.size(0), device=cov_test.device))
-            #     rel_test_optimized = relative_projection_mahalanobis_batched(enc2_feats_test.to(device), P_anchors_enc2, inv_cov_test)
-            # f1_optimized = evaluate_classifier(clf_optimized, rel_test_optimized, enc2_labels_test.to(device), device)
+            if dist_metric == "cosine":
+                rel_test_optimized = relative_projection_cosine(enc2_feats_test.to(device), P_anchors_enc2)
+            elif dist_metric == "euclidean":
+                rel_test_optimized = relative_projection_euclidean(enc2_feats_test.to(device), P_anchors_enc2)
+            elif dist_metric == "mahalanobis":
+                cov_test = compute_covariance_matrix(enc2_feats_train.to(device))
+                inv_cov_test = torch.linalg.inv(cov_test + 1e-6 * torch.eye(cov_test.size(0), device=cov_test.device))
+                rel_test_optimized = relative_projection_mahalanobis_batched(enc2_feats_test.to(device), P_anchors_enc2, inv_cov_test)
+            f1_optimized = evaluate_classifier(clf_optimized, rel_test_optimized, enc2_labels_test.to(device), device)
             
-            # print(f"  Random ({dist_metric}) F1: {f1_random:.2f}%, Optimized ({dist_metric}) F1: {f1_optimized:.2f}%")
-            # results_random[num_anchors].append(f1_random)
-            # results_optimized[num_anchors].append(f1_optimized)
+            print(f"  Random ({dist_metric}) F1: {f1_random:.2f}%, Optimized ({dist_metric}) F1: {f1_optimized:.2f}%")
+            results_random[num_anchors].append(f1_random)
+            results_optimized[num_anchors].append(f1_optimized)
 
             # --- KMEANS ANCHORS ---
             print("Computing KMeans-based datapoint anchors on enc1")
@@ -511,5 +462,5 @@ if __name__ == "__main__":
         print(f"Starting run with distance metric: {metric}")
         print("======================================\n")
         # Change "cifar100" to "imagenet1k" as needed
-        run_experiment(metric, dataset_name="cifar100")
+        run_experiment(metric, dataset_name="CIFAR100_coarse")
         

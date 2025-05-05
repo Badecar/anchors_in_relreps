@@ -3,3 +3,6 @@ material.ipynb
 features_dict_CIFAR100_coarse.pt
 img_embeds.pt
 txt_embeds.pt
+train_img_txt_emb.pt
+txt_prompt_emb.pt
+val_image_emb.pt
