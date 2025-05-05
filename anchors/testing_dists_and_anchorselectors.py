@@ -92,10 +92,12 @@ def get_kmeans_anchors_clustered(src_emb, tgt_emb, anchor_num, n_closest=20, kme
     kmeans.fit(src_emb)
     centers = kmeans.cluster_centers_
     
+
     clusters_info = []
     anchors_src = []
     anchors_tgt = []
     
+
     for center in tqdm(centers, desc="Processing clusters"):
         dists = np.linalg.norm(src_emb - center, axis=1)
         candidate_order = np.argsort(dists)[:n_closest]
@@ -107,6 +109,7 @@ def get_kmeans_anchors_clustered(src_emb, tgt_emb, anchor_num, n_closest=20, kme
         anchor_tgt = np.average(tgt_emb[candidate_global], axis=0, weights=weights)
         anchors_src.append(anchor_src)
         anchors_tgt.append(anchor_tgt)
+    
     
     anchors_src = np.vstack(anchors_src)
     anchors_tgt = np.vstack(anchors_tgt)

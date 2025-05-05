@@ -2,7 +2,7 @@ from zero_shot import rel_AE_conv_MNIST
 from models import AE_conv, load_saved_emb, load_AE_models, train_AE
 from utils import *
 from data import load_mnist_data
-from anchors import train_relrep_decoder, one_pass_optimization, pretrain_P
+from anchors import train_relrep_decoder, one_pass_optimization, pretrain_P, make_whitener
 
 import numpy as np
 import torch
@@ -26,12 +26,12 @@ loader = train_loader
 ### PARAMETERS ###
 model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
 decoder = rel_AE_conv_MNIST
-load_saved = False       # Load saved embeddings from previous runs (from models/saved_embeddings)
+load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
 load_model = False
 save_model = True
 dim = 200         # If load_saved: Must match an existing dim
-epoch = 10
+epoch = 50
 anchor_num = dim
 nr_runs = 20            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64) # (32, 64) or 128
@@ -53,7 +53,7 @@ else:
         hidden_layer=hidden_layer,
         nr_runs=nr_runs,
         save=save_run,
-        verbose=False,
+        verbose=True,
         train_loader=train_loader,
         test_loader=test_loader,
         input_dim=28*28,
@@ -85,10 +85,11 @@ if ckpt_path.is_file() and load_model:
     one_pass_optimization_model = one_pass_optimization_model.to(device)
 
 else:
-    pretrain_P(one_pass_optimization_model,
-           epochs=1000,
-           lr=1e-2,
-           device=device)
+    banks  = [torch.from_numpy(x).float() for x in emb_list]  # list of [N,d] tensors
+
+    # 2) build whiteners for every bank
+    whiteners = [make_whitener(b).to(device) for b in banks]
+
     
     # -- create id lookup table to speed up training -----------------------------------------------
 
@@ -99,15 +100,17 @@ else:
         id_lookup.append(lut.to(device))
 
     # -- train from scratch -----------------------------------------------
-    one_pass_optimization_model = train_relrep_decoder(
+    train_relrep_decoder(
         model            = one_pass_optimization_model,
         dataloader       = train_loader,
         id_lookup        = id_lookup,
-        embeddings_list  = emb_list,      # make sure this matches the function signature
+        whiteners        = whiteners,
+        banks            = banks,      # make sure this matches the function signature
         epochs           = epoch,
         lr               = 5e-3,
+        w_cd            = 0.2,
         device           = device,
-        verbose=True
+        verbose          = True
     )
     if save_model:
         one_pass_optimization_model.save_model(path)
