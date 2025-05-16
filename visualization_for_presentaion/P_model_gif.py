@@ -7,7 +7,7 @@ if parent_path not in sys.path:
 import numpy as np
 import matplotlib.pyplot as plt
 import imageio
-from anchors import get_optimized_anchors
+from anchors import get_P_anchors
 import random
 from scipy.spatial.distance import pdist
 from tqdm import tqdm
@@ -31,7 +31,7 @@ black_points = black_points - np.mean(black_points, axis=0)
 red_points    = black_points[np.random.choice(np.arange(len(black_points)), 10)]
 
 n_frames      = 150            # number of frames in the animation
-output_gif    = 'visualization_for_presentaion/animation_P.gif'
+output_gif    = 'visualization_for_presentaion/2animation_P.gif'
 fps           = 20
 
 # Create a directory for frame images
@@ -50,7 +50,7 @@ anchors_list = []
 
 for i in tqdm(range(100), desc="getting anchors"):
     set_random_seeds(0)
-    _, P_anchors_list = get_optimized_anchors(
+    _, P_anchors_list, _ = get_P_anchors(
         emb = [black_points],
         anchor_num=2,
         epochs=i*2,
@@ -59,7 +59,7 @@ for i in tqdm(range(100), desc="getting anchors"):
         diversity_weight=0.05,
         exponent=1,
         dist_measure="euclidean", ## "euclidean", "mahalanobis", "cosine"
-        verbose=False,
+        verbose=True,
         device=device,
     )
     anchors_list.append(P_anchors_list[0])

@@ -4,15 +4,12 @@ import torch
 import numpy as np
 from torch.utils.data import DataLoader, Subset
 from torchvision import transforms, models
-from PIL import Image
 from tqdm import tqdm
-import torch.nn.functional as F
-import csv
 
 from sentence_transformers import SentenceTransformer
 
 # Import our SBU dataset and collate function from LIRA3.py
-from LIRA3 import SBUDataset, custom_collate_fn
+from LIRA.LIRA_SBU import SBUDataset, custom_collate_fn
 
 # ----- Relative representation functions (as we always use) -----
 def compute_covariance_matrix(features):

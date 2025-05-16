@@ -5,100 +5,12 @@ import numpy as np
 from scipy.optimize import minimize
 from tqdm import tqdm
 import torch
-import torch.optim as optim
+import matplotlib.pyplot as plt
+from scipy.stats import binned_statistic
+from anchors.kmeans_anchors import optimize_weights
+from relreps import compute_covariance_matrix
 
-def optimize_weights(center, candidates, lambda_reg=0.1, lr=1e-2, epochs=200, device="cuda"):
-    """
-    Optimize weights on GPU so that a weighted combination of candidate points approximates center.
-    The objective is:
-      ||sum_i w_i * candidate_i - center||² + lambda_reg * KL(w || uniform)
-    We enforce w_i >= 0 and sum_i w_i = 1 by representing the weights via softmax.
-    
-    Args:
-      center: torch.Tensor of shape (D,)
-      candidates: torch.Tensor of shape (n_candidates, D)
-      lambda_reg: float, regularization coefficient.
-      lr: learning rate
-      epochs: number of optimization steps
-      device: device string, e.g. "cuda" or "cpu"
-    
-    Returns:
-      weights: numpy array of shape (n_candidates,), representing the optimized weights.
-    """
-    if not isinstance(center, torch.Tensor):
-        center = torch.from_numpy(np.array(center))
-    if not isinstance(candidates, torch.Tensor):
-        candidates = torch.from_numpy(np.array(candidates))
-    center = center.to(device)
-    candidates = candidates.to(device)
-    
-    n = candidates.shape[0]
-    # We optimize an unconstrained parameter vector which will be normalized via softmax.
-    params = torch.zeros(n, device=device, requires_grad=True)
-    
-    optimizer = optim.Adam([params], lr=lr)
-    eps = 1e-8
-    
-    for epoch in range(epochs):
-        optimizer.zero_grad()
-        # Apply softmax to ensure positivity and unity sum.
-        w = torch.softmax(params, dim=0)
-        reconstruction = torch.matmul(w, candidates)
-        reconstruction_error = torch.norm(reconstruction - center) ** 2
-        
-        # Compute KL divergence with the uniform distribution (each weight ~ 1/n)
-        kl = torch.sum(w * torch.log(w * n + eps))
-        
-        loss = reconstruction_error + lambda_reg * kl
-        loss.backward()
-        optimizer.step()
-    
-    with torch.no_grad():
-        final_weights = torch.softmax(params, dim=0).cpu().numpy()
-    
-    return final_weights
-
-# def optimize_weights(center, candidates, lambda_reg=0.1):
-#     """
-#     Optimize weights so that a weighted combination of candidate points approximates the center
-#     with an entropy-like regularization.
-    
-#     Args:
-#       center: numpy array of shape [D,]
-#       candidates: numpy array of shape [n_closest, D]
-#       lambda_reg: regularization coefficient.
-    
-#     Returns:
-#       weights: numpy array of shape [n_closest,]
-#     """
-#     n = candidates.shape[0]
-#     epsilon = 1e-8
-#     def objective(w):
-#         reconstruction_error = np.linalg.norm(np.dot(w, candidates) - center)**2
-#         # KL divergence with uniform distribution (ideal weight = 1/n)
-#         kl = np.sum(w * np.log(w * n + epsilon))
-#         return reconstruction_error + lambda_reg * kl
-#     cons = {'type': 'eq', 'fun': lambda w: np.sum(w) - 1}
-#     bounds = [(0, None)] * n
-#     w0 = np.ones(n) / n
-#     res = minimize(objective, w0, method='SLSQP', bounds=bounds, constraints=cons)
-#     if res.success:
-#         return res.x
-#     else:
-#         return w0
-
-def compute_covariance_matrix(embeddings):
-    """
-    Computes the sample covariance matrix for embeddings.
-    
-    embeddings: Tensor of shape [N, D]
-    
-    Returns: Tensor of shape [D, D]
-    """
-    mean = embeddings.mean(dim=0, keepdim=True)
-    centered = embeddings - mean
-    cov = (centered.t() @ centered) / (embeddings.size(0) - 1)
-    return cov
+TEMP = 0.2
 
 class AnchorSelector(nn.Module):
     def __init__(self, N, N_anchors):
@@ -115,11 +27,10 @@ class AnchorSelector(nn.Module):
         # Enforce each row to sum to 1 (soft assignment)
         # You can control the temperature in softmax for sharper assignment
         # Higher temperature -> softer assignment
-        T = 0.2
+        T = TEMP
         P = F.softmax(self.Q / T, dim=1)
         anchors = P @ X  # [N_anchors, D]
         return anchors
-
 
 # NOTE: Eucl
 def diversity_loss_eucl(anchors, exponent=1.0, scale=1.0/np.sqrt(2)):
@@ -153,14 +64,6 @@ def coverage_loss_cossim(anchors, embeddings):
 
 #NOTE: Using Mahalanobis distance.
 def coverage_loss_mahalanobis(anchors, embeddings, inv_cov):
-    """
-    For each embedding, compute its Mahalanobis distance to each anchor and take the minimum.
-    Returns the negative mean of these minimum distances.
-    
-    anchors: [N_anchors, D]
-    embeddings: [N, D]
-    inv_cov: [D, D] inverse covariance matrix.
-    """
     # Compute differences: shape [N, N_anchors, D]
     diff = embeddings.unsqueeze(1) - anchors.unsqueeze(0)
     # Compute Mahalanobis distances: d_i,j = sqrt((x_i - a_j)^T * inv_cov * (x_i - a_j))
@@ -169,13 +72,6 @@ def coverage_loss_mahalanobis(anchors, embeddings, inv_cov):
     return -torch.mean(min_dists)
 
 def diversity_loss_mahalanobis(anchors, inv_cov, exponent=1.0):
-    """
-    Computes the average pairwise Mahalanobis distance (raised to the given exponent)
-    between anchors as a measure of diversity.
-    
-    anchors: [N_anchors, D]
-    inv_cov: [D, D] inverse covariance matrix.
-    """
     n = anchors.size(0)
     dists = []
     for i in range(n):
@@ -189,50 +85,75 @@ def diversity_loss_mahalanobis(anchors, inv_cov, exponent=1.0):
     dists = torch.stack(dists)
     return -torch.mean(dists ** exponent)
 
-# Batched version for Mahalanobis coverage loss.
-def coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov, batch_size=2**16):
-    total_loss = 0.0
-    total_samples = 0
-    for i in range(0, embeddings.size(0), batch_size):
-        emb_batch = embeddings[i:i+batch_size]                         # shape: (B, D)
-        diff = emb_batch.unsqueeze(1) - anchors.unsqueeze(0)             # (B, N_anchors, D)
-        # print(f"got through the {i}th diff")
-        # Using the same einsum string as in the test function:
-        dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8)
-        min_dists, _ = torch.min(dists, dim=1)
-        total_loss += torch.sum(min_dists)
-        total_samples += emb_batch.size(0)
-    return total_loss / total_samples
-
-# Batched version for Mahalanobis diversity loss.
-def diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=1.0, batch_size=2**16):
-    n = anchors.size(0)
-    total_loss = 0.0
-    count = 0
-    for i in range(0, n, batch_size):
-        end_i = min(i+batch_size, n)
-        for j in range(i+1, n, batch_size):
-            end_j = min(j+batch_size, n)
-            a_batch = anchors[i:end_i]   # shape: (B1, D)
-            b_batch = anchors[j:end_j]   # shape: (B2, D)
-            diff = a_batch.unsqueeze(1) - b_batch.unsqueeze(0)  # (B1, B2, D)
-            dists = torch.sqrt(torch.einsum("bij,jk,bik->bi", diff, inv_cov, diff) + 1e-8) # Dont save cov matrix in grad
-            total_loss += torch.sum(dists ** exponent)
-            count += dists.numel()
-    if count == 0:
-        return torch.tensor(0.0, device=anchors.device)
-    return -total_loss / count
-
-
 def anti_collapse_loss(anchors):
     # return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
     return torch.mean(torch.abs(1 - torch.norm(anchors, dim=1)))
 
-def anchor_size_loss(anchors):
-   return -torch.mean(torch.norm(anchors, dim=1))
+# def anchor_size_loss(anchors):
+#    return -torch.mean(torch.norm(anchors, dim=1))
 
+def anchor_size_loss(anchors, target=1.0):
+    # Penalize when anchors have norms below the target.
+    current_sizes = torch.norm(anchors, dim=1)
+    loss = torch.mean(torch.abs(target - current_sizes) ** 2)
+    return loss
 
-def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, dist_measure="cosine", verbose=True, device='cpu'):
+def parameter_magnitude_loss(anchor_selector):
+    # Penalize for large magnitude in the parameter matrix P.
+    return torch.norm(anchor_selector.P, p=2)
+
+def clustering_loss(anchors, X, P, gamma=0.1):
+    """
+    Compute a clustering loss using the assignment weights.
+    
+    anchors: [N_anchors, D] computed as P @ X.
+    X: [N, D] embeddings.
+    P: [N_anchors, N] soft-assignment weights.
+    gamma: coefficient that scales the entropy term.
+    
+    Returns:
+      loss: a scalar tensor. For each anchor, we penalize high weighted distance
+            and reward high entropy.
+    """
+    # Compute the Euclidean distances from each anchor to each point in X.
+    dists = torch.cdist(anchors, X, p=2)  # shape: [N_anchors, N]
+    # Weighted distance term: penalize anchors that put mass on faraway points.
+    loss_distance = torch.sum(P * dists) / P.shape[0]
+    
+    # Entropy term: discourage the selector from focusing on only one or two points.
+    entropy = -torch.sum(P * torch.log(P + 1e-8)) / P.shape[0]
+    
+    # We subtract the entropy term so that higher entropy (more spread-out assignments)
+    # reduce the loss.
+    return loss_distance - gamma * entropy
+    # return gamma*entropy
+
+def locality_kl_loss(anchors, X, P, sigma=1.0):
+    """
+    Compute a KL divergence loss encouraging the soft assignments P to be close to a Gaussian target.
+    
+    anchors: [N_anchors, D] computed as P @ X.
+    X: [N, D] embeddings.
+    P: [N_anchors, N] soft-assignment weights.
+    sigma: standard deviation for the Gaussian target.
+    
+    Returns:
+      A scalar tensor representing the KL divergence loss.
+    """
+    # Compute distances from each anchor to all points: [N_anchors, N]
+    dists = torch.cdist(anchors, X, p=2)
+    # Compute the target Gaussian distribution for each anchor
+    # exp(-d^2/(2*sigma^2)) then normalize over points.
+    target = torch.exp(- dists ** 2 / (2 * sigma ** 2))
+    target = target / (target.sum(dim=1, keepdim=True) + 1e-8)
+    
+    # Compute KL divergence: target * log(target/(P+eps))
+    eps = 1e-8
+    kl = torch.sum(target * torch.log((target + eps) / (P + eps)), dim=1)
+    # Average over the anchors
+    return kl.mean()
+
+def optimize_anchors(anchor_selector, embeddings, temp=0.2, epochs=100, lr=1e-3, coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exp=1, dist_measure="cosine", verbose=True, device='cpu'):
     """
     Optimize the Q parameters in AnchorSelector so that anchors = softmax(Q) @ embeddings
     minimize a combined loss of coverage and diversity.
@@ -245,13 +166,14 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
       coverage_weight (float): Weight for the coverage term.
       diversity_weight (float): Weight for the diversity term.
       verbose (bool): If set, print the loss every few epochs.
-      
+
     Returns:
       anchors (Tensor): The optimized anchors matrix [N_anchors, D].
     """
     optimizer = torch.optim.Adam(anchor_selector.parameters(), lr=lr)
-    for epoch in range(epochs):
+    for epoch in tqdm(range(epochs)):
         anchors = anchor_selector(embeddings)
+        P = torch.softmax(anchor_selector.Q / TEMP, dim=1)
         if dist_measure == "euclidean":
             loss_cov = coverage_loss_eucl(anchors, embeddings)
             loss_div = diversity_loss_eucl(anchors, exponent=exp)
@@ -262,90 +184,103 @@ def optimize_anchors(anchor_selector, embeddings, epochs=100, lr=1e-3, coverage_
             anti_collapse_w = 0.0  # No anti-collapse loss needed for euclidean
         elif dist_measure == "mahalanobis":
             inv_cov = torch.linalg.inv(compute_covariance_matrix(embeddings) + 1e-6 * torch.eye(embeddings.size(1), device=embeddings.device)).detach()
-            loss_cov = coverage_loss_mahalanobis_batched(anchors, embeddings, inv_cov)
-            loss_div = diversity_loss_mahalanobis_batched(anchors, inv_cov, exponent=exp)
+            loss_cov = coverage_loss_mahalanobis(anchors, embeddings, inv_cov)
+            loss_div = diversity_loss_mahalanobis(anchors, inv_cov, exponent=exp)
         else:
             raise ValueError(f"dist_measure must be one of 'euclidean', 'cosine', or 'mahalanobis' but was {dist_measure}.")
-        loss = diversity_weight * loss_div + coverage_weight * loss_cov + anti_collapse_w * anchor_size_loss(anchors)
-
+        #Getting decent results (better than basic P) with cl loss and high gamma.
+        #But still having issues with the weights concentrated in one or two values (also a slight issue with kmeans atm)
+        #Maybe look into using the same optimization as kmeans or setting n_closest value or the like
+        #These values
+        cl_w = 0.4
+        lc_w = 20
+        cl_loss = clustering_loss(anchors, embeddings, P, gamma=10)
+        locality_loss = locality_kl_loss(anchors, embeddings, P, sigma=0.1)
+        loss = (diversity_weight * loss_div +
+                coverage_weight * loss_cov +
+                cl_w * cl_loss +
+                lc_w * locality_loss +
+                anti_collapse_w * anchor_size_loss(anchors))
+        
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
         if verbose and epoch % 10 == 0:
-            print(f"Epoch {epoch:3d}: loss={loss.item():.7f}, weighted coverage={loss_cov.item()*coverage_weight:.7f}, weighted diversity={loss_div.item()*diversity_weight:.7f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
-    return anchor_selector(embeddings)
+            print(f"Epoch {epoch:3d}: loss={loss.item():.4f}, weighted coverage={loss_cov.item()*coverage_weight:.4f}, weighted diversity={loss_div.item()*diversity_weight:.4f}, weighted clusterweight={cl_loss.item()*cl_w:.4f}, weighted localityloss={locality_loss.item()*lc_w:.4f}, weighted anti-collapse={anti_collapse_loss(anchors).item()*anti_collapse_w:.4f}")
+    
+    anchors = anchor_selector(embeddings)
+    return anchors
 
-
-def get_optimized_anchors(emb, anchor_num, epochs=50, lr=1e-1,
-                          coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1, dist_measure="cosine", verbose=True, device='cpu'):
+def get_P_anchors(emb, anchor_num, clustered=False, n_closest=20, lambda_reg=0.1,
+                    epochs=50, lr=1e-1, coverage_weight=1.0, diversity_weight=None,
+                    anti_collapse_w=1.0, exponent=1, dist_measure="cosine", verbose=True, device='cpu'):
     """
-    For a list of embeddings (numpy arrays), optimize anchors on the first run's embeddings
-    and then compute the corresponding anchors for every run.
+    For a list of embeddings (numpy arrays), trains an AnchorSelector on the first embedding.
+    If clustered is False, computes anchors for each run.
+    If clustered is True, refines each anchor by finding its nearest n_closest points in the first embedding,
+    optimizing weights to recompute the anchor, and then applies the candidate indices and weights to every run.
+    
+    Args:
+        emb (list of numpy arrays): each array is of shape [N, D].
+        anchor_num (int): number of anchors.
+        clustered (bool): If True, refine anchors using nearest neighbor optimization similarly to KMeans.
+        n_closest (int): Number of candidate datapoints per anchor (used when clustered=True).
+        lambda_reg (float): Regularization coefficient for optimize_weights.
+        epochs (int): Number of epochs for training the AnchorSelector.
+        lr (float): Learning rate.
+        coverage_weight (float): Weight for the coverage loss.
+        diversity_weight (float): Weight for the diversity loss.
+        anti_collapse_w (float): Weight for the anchor size loss.
+        exponent (int): Exponent used in diversity loss.
+        dist_measure (str): Distance measure, one of "euclidean", "cosine", or "mahalanobis".
+        verbose (bool): If True, print progress.
+        device (str): Device string, e.g. "cpu" or "cuda".
     
     Returns:
-      anchor_selector: the trained AnchorSelector.
-      P_anchors_list: list of anchors for each run.
+        If clustered is False:
+            anchor_selector: The trained AnchorSelector.
+            P_anchors_list: List of anchors (each as a numpy array of shape [anchor_num, D]) for each embedding.
+        If clustered is True:
+            anchor_selector: The trained AnchorSelector.
+            P_anchors_list: List of refined anchors for each embedding.
+            clusters_info: List of tuples for each anchor: (candidate_indices, weights, refined_anchor)
     """
+    if diversity_weight is None:
+        diversity_weight = 1.0 - coverage_weight
     if verbose:
-      print("Optimizing P anchors...")
+        print("Training AnchorSelector...")
     # Optimize on the first run's embeddings
     X_first = emb[0]
     X_first_tensor = torch.from_numpy(X_first).to(device)
     anchor_selector = AnchorSelector(N=X_first_tensor.shape[0], N_anchors=anchor_num).to(device)
     optimize_anchors(anchor_selector, X_first_tensor, epochs=epochs, lr=lr,
-                     coverage_weight=coverage_weight, diversity_weight=diversity_weight, anti_collapse_w=anti_collapse_w,
-                     exp=exponent, dist_measure=dist_measure, verbose=verbose, device=device)
+                        coverage_weight=coverage_weight, diversity_weight=diversity_weight,
+                        anti_collapse_w=anti_collapse_w, exp=exponent, dist_measure=dist_measure,
+                        verbose=verbose, device=device)
     
-    # Compute anchors for each run using the optimized anchor_selector
-    P_anchors_list = []
-    for emb in emb:
-        X_tensor_run = torch.from_numpy(emb).to(device)
-        anchors_run = anchor_selector(X_tensor_run)
-        P_anchors_list.append(anchors_run.cpu().detach().numpy())
-    
-    return anchor_selector, P_anchors_list
+    # If not clustered, simply compute anchors for every embedding
+    if not clustered:
+        P_anchors_list = []
+        for emb_arr in emb:
+            X_tensor_run = torch.from_numpy(emb_arr).to(device)
+            anchors_run = anchor_selector(X_tensor_run)
+            P_anchors_list.append(anchors_run.cpu().detach().numpy())
+        if verbose:
+            plot_anchor_histogram(anchor_selector, X_first_tensor, temp=0.2, sample_idx=0)
+        return anchor_selector, P_anchors_list, []
 
-def get_P_anchors_clustered(emb, anchor_num, n_closest=20, lambda_reg=0.1, epochs=50, lr=1e-1,
-                            coverage_weight=1.0, diversity_weight=1.0, anti_collapse_w=1.0, exponent=1,
-                            dist_measure="cosine", verbose=True, device='cpu'):
-    """
-    Trains an AnchorSelector on the first embedding in emb and then refines its anchors
-    similarly to KMeans clusters.
-    
-    Steps:
-      1. Train the anchor selector on the first embedding.
-      2. Compute the initial anchors for the first embedding.
-      3. For each anchor (cluster center), find the n_closest datapoints (Euclidean) in the first embedding,
-         and recompute the anchor as a weighted average using optimized weights.
-      4. For every embedding in emb, compute refined anchors using the same candidate indices and weights.
-    
-    Args:
-      emb (list of numpy arrays): each array is of shape [N, D].
-      anchor_num (int): number of anchors.
-      n_closest (int): number of candidate datapoints per anchor.
-      lambda_reg (float): regularization for optimize_weights.
-      epochs, lr, coverage_weight, diversity_weight, anti_collapse_w, exponent, dist_measure, verbose, device:
-         parameters passed to get_optimized_anchors.
-    
-    Returns:
-      anchor_selector: the trained AnchorSelector.
-      P_anchors_list: list of refined anchors (each as a numpy array of shape [anchor_num, D]) for each embedding.
-      clusters_info: list of tuples for each anchor: (candidate_indices, weights, refined_anchor)
-    """
-    # Train anchor selector on the first embedding
-    X_first = emb[0]
-    X_first_tensor = torch.from_numpy(X_first).to(device)
-    anchor_selector, _ = get_optimized_anchors(emb=[X_first], anchor_num=anchor_num, epochs=epochs, lr=lr,
-                                               coverage_weight=coverage_weight, diversity_weight=diversity_weight,
-                                               anti_collapse_w=anti_collapse_w, exponent=exponent,
-                                               dist_measure=dist_measure, verbose=verbose, device=device)
-    # Compute initial anchors from the trained selector on the first embedding
+    # IF CLUSTERED PERFORM CLUSTERING ALGORITHM #
+
+    if verbose:
+        print("Refining anchors using clustering...")
+    # Compute initial anchors on the first embedding
     initial_anchors = anchor_selector(X_first_tensor)  # shape: [anchor_num, D]
     initial_anchors_np = initial_anchors.cpu().detach().numpy()
-
+    
     clusters_info = []
     refined_anchors_first = []
-    # For each anchor, find its nearest n_closest points and refine the anchor.
+    # For each anchor, find its n_closest points in the first embedding,
+    # and use optimized weights to compute a refined anchor.
     for i in tqdm(range(anchor_num), desc="Refining Anchors"):
         anchor_center = initial_anchors_np[i]
         # Compute Euclidean distances from anchor_center to all datapoints in X_first
@@ -358,7 +293,7 @@ def get_P_anchors_clustered(emb, anchor_num, n_closest=20, lambda_reg=0.1, epoch
         refined_anchors_first.append(refined_anchor)
     refined_anchors_first = np.vstack(refined_anchors_first)  # shape: [anchor_num, D]
     
-    # For each embedding in emb, compute refined anchors using the same candidate indices and weights
+    # For each embedding in emb, compute refined anchors using the same candidate indices and weights.
     P_anchors_list = []
     for X in emb:
         refined_anchors = []
@@ -370,3 +305,77 @@ def get_P_anchors_clustered(emb, anchor_num, n_closest=20, lambda_reg=0.1, epoch
         P_anchors_list.append(refined_anchors)
     
     return anchor_selector, P_anchors_list, clusters_info
+
+def plot_anchor_histogram(anchor_selector, X_first_tensor, temp=0.2, sample_idx=0):
+    """
+    Plots histograms of average weights vs Euclidean distance and prints the top 15 largest weights.
+    
+    Args:
+      anchor_selector: The trained AnchorSelector containing parameter Q.
+      X_first_tensor (Tensor): The tensor of embeddings from the first run.
+      temp (float): Temperature used for softmax.
+      sample_idx (int): Index of the sample anchor to plot.
+    """
+    with torch.no_grad():
+        T = temp
+        P = F.softmax(anchor_selector.Q / T, dim=1)
+        anchors_out = P @ X_first_tensor
+        sample_weights = P[sample_idx]
+        sample_anchor = anchors_out[sample_idx].unsqueeze(0)  # shape: [1, D]
+        sample_dists = torch.cdist(sample_anchor, X_first_tensor, p=2).squeeze(0)
+        
+        if sample_weights is not None and sample_dists is not None:
+            sample_weights_np = sample_weights.cpu().detach().numpy()
+            sample_dists_np = sample_dists.cpu().detach().numpy()
+            
+            # Parameters for adjustable binning
+            overall_bins = 80          # for the overall histogram
+            first_bins_count = 15      # number of smallest bins to zoom in on
+            zoom_bins = 100            # new number of bins for the zoom-in region
+            
+            # Compute overall binned statistic (average weight per bin)
+            bin_means, bin_edges, _ = binned_statistic(sample_dists_np, sample_weights_np,
+                                                        statistic='mean', bins=overall_bins)
+            bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2.
+            
+            # Find the cutoff for the "first" bins (using the upper edge of the first_bins_count bins)
+            cutoff = bin_edges[first_bins_count]
+            # Recompute binned statistics for the zoom region (samples with distance <= cutoff)
+            zoom_mask = sample_dists_np <= cutoff
+            if np.sum(zoom_mask) > 0:
+                zoom_dists = sample_dists_np[zoom_mask]
+                zoom_weights = sample_weights_np[zoom_mask]
+                zoom_bin_edges = np.linspace(bin_edges[0], cutoff, zoom_bins+1)
+                zoom_bin_means, _, _ = binned_statistic(zoom_dists, zoom_weights,
+                                                        statistic='mean', bins=zoom_bin_edges)
+                zoom_bin_centers = (zoom_bin_edges[:-1] + zoom_bin_edges[1:]) / 2.
+            else:
+                zoom_bin_means, zoom_bin_centers = None, None
+            
+            # Print the 15 largest weights for the anchor
+            sorted_weights = sorted(sample_weights_np, reverse=True)
+            top_15 = sorted_weights[:15]
+            print("\nTop 15 largest weights for anchor {}:".format(sample_idx))
+            for i, w in enumerate(top_15):
+                print("{}. {:.15f}".format(i+1, w))
+            
+            # Save the overall histogram-like average weights plot
+            plt.figure(figsize=(8, 4))
+            plt.plot(bin_centers, bin_means, marker='o', linestyle='-')
+            plt.xlabel("Euclidean Distance")
+            plt.ylabel("Average Weight")
+            plt.title("Anchor {}: Full Average Weight vs. Distance Histogram".format(sample_idx))
+            plt.grid(True)
+            plt.savefig("full_histogram_anchor_{}_plot.png".format(sample_idx))
+            plt.close()
+            
+            # Save the zoom-in histogram plot if available
+            if zoom_bin_means is not None:
+                plt.figure(figsize=(8, 4))
+                plt.plot(zoom_bin_centers, zoom_bin_means, marker='o', linestyle='-')
+                plt.xlabel("Euclidean Distance")
+                plt.ylabel("Average Weight")
+                plt.title("Anchor {}: Zoomed Average Weight (first {} bins re-binned into {} bins)".format(sample_idx, first_bins_count, zoom_bins))
+                plt.grid(True)
+                plt.savefig("zoom_histogram_anchor_{}_plot.png".format(sample_idx))
+                plt.close()

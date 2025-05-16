@@ -14,8 +14,8 @@ def get_save_dir(model, latent_dim, data="FMNIST"):
             m = 'VAE'
     elif model == AE_conv:
             m = 'AE_conv_MNIST'
-    save_dir_emb = os.path.join("experiments", data,"saved_embeddings", m, f"dim{latent_dim}")
-    save_dir_AE = os.path.join("experiments", data,"saved_models", m, f"dim{latent_dim}")
+    save_dir_emb = os.path.join("experiments", "experiments_data", data, "saved_embeddings", m, f"dim{latent_dim}")
+    save_dir_AE = os.path.join("experiments", "experiments_data", data, "saved_models", m, f"dim{latent_dim}")
     os.makedirs(save_dir_AE, exist_ok=True)
     os.makedirs(save_dir_emb, exist_ok=True)
     return save_dir_emb, save_dir_AE

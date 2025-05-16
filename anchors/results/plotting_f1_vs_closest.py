@@ -1,6 +1,7 @@
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
+import os
 
 def read_csv(file_path):
     n_closest = []
@@ -15,8 +16,9 @@ def read_csv(file_path):
     return np.array(n_closest), np.array(mean_f1), np.array(std_f1)
 
 # Update these paths with your actual CSV files.
-csv_file_200 = r"c:\Users\oscar\OneDrive\School\DTU\Semester_4\Relative_representations\Github\anchors_in_relreps\anchors\results\results_nclosestplot_200anch_kmeans_mahalanobis_base_vit_base_resnet50_384_target_vit_small_patch16_224.csv"
-csv_file_768 = r"c:\Users\oscar\OneDrive\School\DTU\Semester_4\Relative_representations\Github\anchors_in_relreps\anchors\results\results_nclosestplot_768anch_kmeans_mahalanobis_base_vit_base_resnet50_384_target_vit_small_patch16_224.csv"
+current_path = os.path.dirname(os.path.abspath(__file__))
+csv_file_200 = os.path.join(current_path, "results_nclosestplot_200anch_kmeans_mahalanobis_base_vit_base_resnet50_384_target_vit_small_patch16_224.csv")
+csv_file_768 = os.path.join(current_path, "results_nclosestplot_768anch_kmeans_mahalanobis_base_vit_base_resnet50_384_target_vit_small_patch16_224.csv")
 
 n_closest_200, mean_f1_200, std_f1_200 = read_csv(csv_file_200)
 n_closest_768, mean_f1_768, std_f1_768 = read_csv(csv_file_768)

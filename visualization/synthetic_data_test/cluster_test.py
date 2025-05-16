@@ -72,6 +72,35 @@ if __name__ == '__main__':
     # Create dataset.
     X, y = create_dataset(centers, cov_params, points_per_cluster)
 
+    # Scale the entire space by a given factor.
+    scale_factor = 6  # adjust this value to scale the space
+    X = scale_factor * X
+    anchors = [scale_factor * a for a in anchors]
+
+    # New transformation parameters
+    rotate_angle_deg = 70  # Rotation angle in degrees; adjust as desired
+    translation_vector = np.array([10, 6])  # Translation vector; adjust as desired
+
+    # Convert rotation angle to radians.
+    rotate_angle = np.radians(rotate_angle_deg)
+
+    # Compute the midmost datapoint (using the median)
+    center_point = np.median(X, axis=0)
+
+    # Create a 2D rotation matrix.
+    R = np.array([[np.cos(rotate_angle), -np.sin(rotate_angle)],
+                [np.sin(rotate_angle),  np.cos(rotate_angle)]])
+
+    # Rotate dataset around the center_point.
+    X = (X - center_point) @ R.T + center_point
+
+    # Translate dataset by the given translation vector.
+    X = X + translation_vector
+
+    # Apply the same transformations to the anchors.
+    anchors = [ (a - center_point) @ R.T + center_point for a in anchors ]
+    anchors = [ a + translation_vector for a in anchors ]
+
     # Plot the absolute dataset with anchors overlaid
     plt.figure(figsize=(6,6))
     plt.scatter(X[:,0], X[:,1], c=y, cmap='viridis', alpha=0.6)
@@ -80,6 +109,13 @@ if __name__ == '__main__':
             plt.scatter(anchor[0], anchor[1], c='red', marker='X', s=150, label='Anchors')
         else:
             plt.scatter(anchor[0], anchor[1], c='red', marker='X', s=150)
+    plt.axhline(0, color='black', linewidth=3)  # thick horizontal line at y=0
+    plt.axvline(0, color='black', linewidth=3)  # thick vertical line at x=0
+
+    # Set fixed coordinate limits (adjust as desired)
+    plt.xlim(-5, 75)
+    plt.ylim(-5, 75)
+
     plt.title('Absolute Data with Anchors')
     plt.xlabel('X')
     plt.ylabel('Y')
@@ -121,7 +157,7 @@ if __name__ == '__main__':
             distances = []
             for a in anchors:
                 diff = embedding - a
-                dist = np.sqrt(np.dot(np.dot(diff, inv_cov_X), diff.T))
+                dist = np.dot(np.dot(diff, inv_cov_X), diff.T)
                 distances.append(dist)
             rel_X[i, :] = distances
     else:
@@ -135,6 +171,13 @@ if __name__ == '__main__':
         color = cmap(label / (len(unique_labels) - 1))  # Normalize label to [0,1]
         plt.scatter(rel_X[y == label, 0], rel_X[y == label, 1],
                     label=f'Class {label}', color=color, alpha=0.6)
+    plt.axhline(0, color='black', linewidth=3)  # thick horizontal line at y=0
+    plt.axvline(0, color='black', linewidth=3)  # thick vertical line at x=0
+
+    # Set fixed coordinate limits (adjust as desired)
+    plt.xlim(-1, 6)
+    plt.ylim(-1, 6)
+
     plt.title('Relative Representation - Mahalanobis')
     plt.xlabel('Feature from Anchor 1')
     plt.ylabel('Feature from Anchor 2')

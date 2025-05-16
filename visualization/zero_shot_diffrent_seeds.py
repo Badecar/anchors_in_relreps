@@ -75,7 +75,7 @@ def zero_shot_different_seeds(number_of_seeds, model, dim, anchor_num, hidden_la
         # P ANCHORS
         ####################################################
 
-        _, P_anchors_list = get_optimized_anchors(
+        _, P_anchors_list, _ = get_P_anchors(
             emb = small_dataset_emb,
             anchor_num=anchor_num,
             epochs=200,

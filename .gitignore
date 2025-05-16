@@ -6,3 +6,6 @@ txt_embeds.pt
 train_img_txt_emb.pt
 txt_prompt_emb.pt
 val_image_emb.pt
+gif_frames/
+img_embeds.pt
+experiments/experiments_data/
