@@ -14,7 +14,7 @@ from typing import Optional, Sequence, Union
 import numpy as np
 from tqdm import tqdm
 import matplotlib.pyplot as plt
-
+import random
 
 class one_pass_optimization(nn.Module):
     """Learnable-Anchor Relative Representation Decoder
@@ -258,6 +258,21 @@ def diversity_loss(anchors_w):
     # pairwise distances between anchors only
     d = torch.pdist(anchors_w, p=2)                 # [m*(m-1)/2]
     return -(d).mean()  
+# ---------- build one whitener (Σ−½) from a bank -------------------
+def make_whitener(bank: torch.Tensor, eps: float = 1e-6) -> torch.Tensor:
+    X   = bank - bank.mean(0, keepdim=True)
+    cov = (X.T @ X) / max(1, len(bank) - 1)           # [d,d]
+    λ, V = torch.linalg.eigh(cov)
+    return V @ torch.diag(1.0 / torch.sqrt(λ + eps)) @ V.T   # Σ−½
+
+# ---------- coverage & diversity on whitened tensors ---------------
+def coverage_loss_wh(anchors_w: torch.Tensor, embeds_w: torch.Tensor):
+    # mean(min distance)  –> we *negate* so lower dist = higher loss
+    return torch.cdist(embeds_w, anchors_w).min(1).values.mean()
+
+def diversity_loss_wh(anchors_w: torch.Tensor, exponent: float = 1.0):
+    # mean pairwise anchor distance  –> negate so small ⇢ high loss
+    return -torch.pdist(anchors_w, p=2).pow(exponent).mean()
 
 def pretrain_P(
     model: nn.Module,
@@ -295,72 +310,78 @@ def pretrain_P(
 
     for p in model.parameters():  p.requires_grad_(True)
 
+def relrep_alignment_loss(
+    embeddings_list,
+    model, 
+    bank_idx,
+) -> torch.Tensor:
+    """
+    Compute MSE loss between two relative-representation spaces.
+    
+    Args:
+        embeddings1: [B, d] from space 1
+        embeddings2: [B, d] from space 2
+        anchors1:    [m, d] anchors for space 1
+        anchors2:    [m, d] anchors for space 2
+    Returns:
+        scalar MSE( R1, R2 )
+    """
+    R1 = model.relrep(embeddings_list[0], bank_idx[0])  # [B, m]
+    R2 = model.relrep(embeddings_list[0], bank_idx[0])  # [B, m]
+    return F.mse_loss(R1, R2)
+
+
 def train_relrep_decoder(
     model: nn.Module,
     dataloader: torch.utils.data.DataLoader,
-    id_lookup,
-    embeddings_list: np.ndarray,
-    epochs: int,
+    id_lookup,                 # list of lookup tensors  id→row
+    banks: list[torch.Tensor], # same order as id_lookup
+    whiteners: list[torch.Tensor],
+    w_cd: float = 0.1,
+    w_alignment : float = 0.3, 
+    epochs: int = 10,
     lr: float = 1e-3,
-    device: Optional[torch.device] = None,
-    verbose=False,
+    device: torch.device = torch.device("cuda"),
+    verbose : bool = False
 ):
-    """
-    Training loop for RelRepDecoder using precomputed embeddings indexed by identifier.
+    model = model.to(device).train()
+    embed_stack = torch.stack(banks, 0).to(device)      # [R,N,d]  on device
+    opt = torch.optim.Adam(model.parameters(), lr=lr)
 
-    Args:
-        model: RelRepDecoder instance (optional embed_bank overrides in forward).
-        dataloader: DataLoader yielding tuples (image, (identifier, label)).
-                    - image: Tensor of shape [C,H,W] or flattened [784]
-                    - (identifier, label): identifier index into embeddings_array, and true label (ignored)
-        embeddings_array: NumPy array of all embeddings from a given encoder, shape [N, d].
-        epochs: Number of training epochs.
-        lr: Learning rate for optimizer.
-        device: torch device (e.g., 'cuda' or 'cpu').
-    """
-    device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = model.to(device)
-    model.train()
+    for epoch in tqdm(range(1, epochs + 1), disable=not verbose):
+        total, count = 0.0, 0
+        for imgs, (ids, _) in dataloader:
+            imgs  = imgs.to(device)
+            # pick a random embedding space this batch
+            bank_idx = random.sample(range(len(banks)), 2)
 
-    # Convert embeddings_array to tensor once
-    embed_tensor = torch.from_numpy(np.array(embeddings_list)).float().to(device)  # [r, N, d]
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-
-    for epoch in tqdm(range(epochs)):
-        total_loss = 0.0
-        count = 0
-
-        for batch in dataloader:
-            bank_idx         = np.random.randint(model.num_banks)   # e.g. random each batch
-            # Expect batch to be (images, (ids, labels))
-            images, id_label = batch
-            images = images.to(device)
-
-            # id_label may be a tuple/list: (ids, labels)
-            if isinstance(id_label, (list, tuple)) and len(id_label) >= 1:
-                ids = id_label[0]
-            else:
-                ids = id_label
-            idx = idx = id_lookup[bank_idx][ids.to(device)]
+            rows1  = id_lookup[bank_idx[0]][ids.to(device)].to(device)      # [B]
+            emb1   = embed_stack[bank_idx[0], rows1].to(device)              # [B,d]
+            rows2  = id_lookup[bank_idx[1]][ids.to(device)].to(device)      # [B]
+            emb2   = embed_stack[bank_idx[1], rows1].to(device)              # [B,d]
             
-            # Lookup corresponding embeddings for this batch
-            emb         = embed_tensor[bank_idx, idx]          # embeddings from that bank
-            # Forward pass: supply embeddings and full embed bank for anchors
-            recon       = model(emb, bank_idx = bank_idx)
-            # Compute reconstruction MSE loss
-            loss        = F.mse_loss(recon, images)
+            # forward with matching bank
+            recon = model(embeddings=emb1, bank_idx=bank_idx[0])
+            mse   = F.mse_loss(recon, imgs)
 
-            optimizer.zero_grad()
+            # alignment_loss
+            alignment_loss = relrep_alignment_loss(embeddings_list=[emb1, emb2], model=model, bank_idx=bank_idx)
+
+            # coverage + diversity on whitened anchors
+            L         = whiteners[bank_idx[0]]                  # [d,d]
+            anchors_w = model.get_anchors(bank_idx[0]) @ L.T    # [m,d]
+            embeds_w  = emb1 @ L.T                       # [B,d]
+
+            cov_loss  = coverage_loss_wh(anchors_w, embeds_w)
+            div_loss  = diversity_loss_wh(anchors_w)
+
+            loss = mse + w_cd * (9/10* cov_loss + 1/10 * div_loss) + w_alignment*alignment_loss
+
+            opt.zero_grad()
             loss.backward()
-            optimizer.step()
+            opt.step()
 
-            bsz         = images.size(0)
-            total_loss += loss.item() * bsz
-            count      += bsz
+            total  += loss.item() * imgs.size(0)
+            count  += imgs.size(0)
 
-        avg_loss = total_loss / max(count, 1)
-        if verbose:
-            print(f"Epoch {epoch}/{epochs} - Avg MSE Loss: {avg_loss:.6f}")
-
-    return model
+        print(f"[{epoch}/{epochs}]  avg loss = {total/count:.6f}")

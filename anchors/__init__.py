@@ -14,5 +14,6 @@ __all__ = [
     'get_P_anchors',
     'get_kmeans_anchors',
     'train_relrep_decoder',
-    'one_pass_optimization'
+    'one_pass_optimization',
+    'make_whitener'
 ]
