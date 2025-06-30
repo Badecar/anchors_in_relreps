@@ -3,16 +3,11 @@ from scipy.spatial.distance import pdist
 import torch
 import torch.nn.functional as F
 
-def get_relrep(features, anchors, dist_metric, device):
-    features = features.to(device)
-    if dist_metric == "cosine":
-        return relrep_cos_torch(features, anchors)
-    elif dist_metric == "euclidean":
-        return relrep_eucl_torch(features, anchors)
-    elif dist_metric == "mahalanobis":
-        cov = compute_covariance_matrix(features)
-        inv_cov = torch.linalg.inv(cov + 1e-6 * torch.eye(cov.size(0), device=cov.device))
-        return relrep_mah_torch_batched(features, anchors, inv_cov)
+def compute_covariance_matrix(features):
+    mean = features.mean(dim=0, keepdim=True)
+    centered = features - mean
+    cov = (centered.t() @ centered) / (features.size(0) - 1)
+    return cov
 
 def relrep_cos_torch(x, anchors):
     if not isinstance(anchors, torch.Tensor):
@@ -26,12 +21,6 @@ def relrep_eucl_torch(x, anchors):
         anchors = torch.tensor(anchors, device=x.device, dtype=x.dtype)
     return - torch.cdist(x, anchors, p=2)
 
-def compute_covariance_matrix(features):
-    mean = features.mean(dim=0, keepdim=True)
-    centered = features - mean
-    cov = (centered.t() @ centered) / (features.size(0) - 1)
-    return cov
-
 def relrep_mah_torch_batched(x, anchors, inv_cov, batch_size=512):
     if not isinstance(anchors, torch.Tensor):
         anchors = torch.tensor(anchors, device=x.device, dtype=x.dtype)
@@ -43,6 +32,16 @@ def relrep_mah_torch_batched(x, anchors, inv_cov, batch_size=512):
         result.append(-dists)
     return torch.cat(result, dim=0)
     
+def get_relrep(features, anchors, dist_metric, device):
+    features = features.to(device)
+    if dist_metric == "cosine":
+        return relrep_cos_torch(features, anchors)
+    elif dist_metric == "euclidean":
+        return relrep_eucl_torch(features, anchors)
+    elif dist_metric == "mahalanobis":
+        cov = compute_covariance_matrix(features)
+        inv_cov = torch.linalg.inv(cov + 1e-6 * torch.eye(cov.size(0), device=cov.device))
+        return relrep_mah_torch_batched(features, anchors, inv_cov)
 
 def compute_relative_coordinates_cossim(embeddings_list, anchors_list, flatten=False):
     """

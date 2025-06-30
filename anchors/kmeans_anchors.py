@@ -6,10 +6,9 @@ from sklearn.cluster import KMeans
 from scipy.optimize import minimize
 from scipy.special import softmax
 from tqdm.auto import tqdm
-
 import os
-# To get around warning
 
+# To get around warning
 os.environ["LOKY_MAX_CPU_COUNT"] = "8"
 
 def optimize_weights(center, candidates, lambda_reg=0.1, lr=1e-2, epochs=200, device="cuda"):

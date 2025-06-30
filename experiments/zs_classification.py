@@ -76,7 +76,7 @@ def run_experiment(dist_metric, dataset_name="cifar100", plot=False):
             _, P_anchors, _ = get_P_anchors(
                 emb=emb_list,
                 anchor_num=num_anchors,
-                clustered=True,
+                clustered=True, # If True uses the anchor coordinates found by P and redefines them as a comb of the n_closests
                 n_closest=n_closest,
                 epochs=400,
                 lr=1e-2,
