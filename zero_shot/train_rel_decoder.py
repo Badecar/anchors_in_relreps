@@ -92,12 +92,13 @@ def train_rel_decoder(epochs, hidden_dims, rel_model, model_list, relrep_list, i
             unique_ids_list=idx_list,
             dataset=loader.dataset,
             sample_indices=sample_indices,
-            device=device
+            device=device,
+            verbose=verbose
         )
 
     return rel_decoder, train_losses, val_losses
 
-def plot_reconstructions(rel_decoder, relreps_list, unique_ids_list, dataset, sample_indices, device):
+def plot_reconstructions(rel_decoder, relreps_list, unique_ids_list, dataset, sample_indices, device, output_file="reconstructions.png", verbose=True):
     """
     Plots a grid of images with the ground truth on the top row followed by one row of decoded images for each AE run.
     Each column corresponds to one of the sample indices.
@@ -180,4 +181,7 @@ def plot_reconstructions(rel_decoder, relreps_list, unique_ids_list, dataset, sa
             axes[row + 1][i].axis("off")
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig(output_file)
+    plt.close()
+    if verbose:
+        print(f"Reconstructions saved to {output_file}")

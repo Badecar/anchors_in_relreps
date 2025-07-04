@@ -30,6 +30,58 @@ for base in transformer_names:
     df = pd.concat([df1, df2], ignore_index=True).sort_values('Target')
     data[base] = df
 
+# Print table in the format shown in the image
+print("Table: Performance comparison with different encoding techniques.")
+print("The table reports the mean weighted F1 (± std) across different datasets and seeds.")
+print()
+
+# Create header
+print(f"{'Decoder':<25} {'Encoder':<25} {'rand & cossim':<15} {'kmeans & mah':<15}")
+print("-" * 80)
+
+# For each decoder (transformer base)
+for decoder in transformer_names:
+    df = data[decoder]
+    
+    # Group by target datasets
+    targets = sorted(df['Target'].unique())
+    
+    # Print the first row with decoder name
+    first_row = True
+    for target in targets:
+        # Get data for this target
+        target_data = df[df['Target'] == target]
+        
+        # Get results for both runs
+        abs_data = target_data[target_data['run'] == 'random + cosine']
+        rel_data = target_data[target_data['run'] == 'kmeans + mahalanobis']
+        
+        # Format the results
+        if len(abs_data) > 0:
+            abs_mean = abs_data['Mean_F1'].iloc[0]
+            abs_std = abs_data['Std_F1'].iloc[0]
+            abs_str = f"{abs_mean:.2f} ± {abs_std:.2f}"
+        else:
+            abs_str = "-"
+            
+        if len(rel_data) > 0:
+            rel_mean = rel_data['Mean_F1'].iloc[0]
+            rel_std = rel_data['Std_F1'].iloc[0]
+            rel_str = f"{rel_mean:.2f} ± {rel_std:.2f}"
+        else:
+            rel_str = "-"
+        
+        # Print the row
+        if first_row:
+            print(f"{decoder:<25} {target:<25} {abs_str:<15} {rel_str:<15}")
+            first_row = False
+        else:
+            print(f"{'':<25} {target:<25} {abs_str:<15} {rel_str:<15}")
+    
+    print()  # Add blank line between decoder groups
+
+print()  # Add blank line before plot
+
 # 4. Plot setup
 fig, ax = plt.subplots(figsize=(12, 6))
 bar_width = 0.35

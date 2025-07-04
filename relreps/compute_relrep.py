@@ -21,7 +21,9 @@ def relrep_eucl_torch(x, anchors):
         anchors = torch.tensor(anchors, device=x.device, dtype=x.dtype)
     return - torch.cdist(x, anchors, p=2)
 
-def relrep_mah_torch_batched(x, anchors, inv_cov, batch_size=512):
+def relrep_mah_torch_batched(x, anchors, batch_size=512):
+    cov = compute_covariance_matrix(x)
+    inv_cov = torch.linalg.inv(cov + 1e-6 * torch.eye(cov.size(0), device=cov.device))
     if not isinstance(anchors, torch.Tensor):
         anchors = torch.tensor(anchors, device=x.device, dtype=x.dtype)
     result = []
@@ -39,9 +41,7 @@ def get_relrep(features, anchors, dist_metric, device):
     elif dist_metric == "euclidean":
         return relrep_eucl_torch(features, anchors)
     elif dist_metric == "mahalanobis":
-        cov = compute_covariance_matrix(features)
-        inv_cov = torch.linalg.inv(cov + 1e-6 * torch.eye(cov.size(0), device=cov.device))
-        return relrep_mah_torch_batched(features, anchors, inv_cov)
+        return relrep_mah_torch_batched(features, anchors)
 
 def compute_relative_coordinates_cossim(embeddings_list, anchors_list, flatten=False):
     """
@@ -122,34 +122,49 @@ def compute_relative_coordinates_euclidean(embeddings_list, anchors_list, flatte
 
 def compute_relative_coordinates_mahalanobis(embeddings_list, anchors_list, inv_cov=None, epsilon=1e-6):
     """
-    Computes the relative representation based on the Mahalanobis distance.
+    Computes the relative representation based on the Mahalanobis distance, normalizing 
+    both the embedding and anchor spaces before computing distances, and then centers the result.
     
     For each pair of embeddings (shape [N, latent_dim]) and anchors (shape [A, latent_dim])
-    in the provided lists, computes the pairwise Mahalanobis distances:
+    in the provided lists, it first normalizes the rows of both arrays to unit norm. Then,
+    it computes the pairwise Mahalanobis distances using:
   
         d(x, a) = sqrt((x-a)^T * inv_cov * (x-a))
   
-    If inv_cov is not provided, it is computed from the embeddings using the sample covariance.
-
+    If inv_cov is not provided, it is computed from the normalized embeddings using the sample covariance.
+    The distances are negated so that closer points have higher similarity, and then the representation
+    is centered using the overall mean computed from all spaces.
+    
     Returns:
-        List of np.array: Each array has shape [N, A] containing the negative Mahalanobis distances.
-                          (Negative distances so that closer points have higher similarity.)
+        List of np.array: Each array has shape [N, A] containing the centered negative Mahalanobis distances.
     """
     relative_reps_outer = []
     for embeddings, anchors in zip(embeddings_list, anchors_list):
+        # Normalize embeddings and anchors along the feature dimension.
+        embeddings_norm = embeddings / np.linalg.norm(embeddings, axis=1, keepdims=True)
+        anchors_norm = anchors / np.linalg.norm(anchors, axis=1, keepdims=True)
+        
         if inv_cov is None:
-            cov = np.cov(embeddings, rowvar=False)
+            cov = np.cov(embeddings_norm, rowvar=False)
             inv_cov_run = np.linalg.inv(cov + epsilon * np.eye(cov.shape[0]))
         else:
             inv_cov_run = inv_cov
 
-        diff = embeddings[:, None, :] - anchors[None, :, :]
+        diff = embeddings_norm[:, None, :] - anchors_norm[None, :, :]
         sq_dists = np.einsum("nad,dc,nac->na", diff, inv_cov_run, diff)
         dists = np.sqrt(sq_dists + 1e-8)
         rel_rep = -dists
-        # Cast to float32 so that the output matches the types of the other functions.
         relative_reps_outer.append(rel_rep.astype(np.float32))
-    return relative_reps_outer
+    
+    # Compute overall shift based on the mean of all spaces combined.
+    all_reps = np.concatenate(relative_reps_outer, axis=0)
+    shift = np.mean(all_reps, axis=0, keepdims=True)
+    
+    centered_reps = []
+    for rep in relative_reps_outer:
+        centered_reps.append(rep - shift)
+        
+    return centered_reps
 
 
 def encode_relative_by_index(index, embeddings, anchors, flatten=False):

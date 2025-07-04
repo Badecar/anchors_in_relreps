@@ -23,8 +23,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print(f"Using device: {device}: {torch.cuda.get_device_name(0)}")
 
 # Load data
-train_loader, test_loader, val_loader = load_mnist_data()
-data = "MNIST" # "FMNIST" or "MNIST". NOTE: Remember to replace load function above
+train_loader, test_loader, val_loader = load_fashion_mnist_data()
+data = "FMNIST" # "FMNIST" or "MNIST". NOTE: Remember to replace load function above
 loader = val_loader
 use_small_dataset = False # Must be false if zero-shot
 
@@ -32,9 +32,9 @@ use_small_dataset = False # Must be false if zero-shot
 model = AE_conv #VariationalAutoencoder, AEClassifier, or Autoencoder, AE_conv
 load_saved = True       # Load saved embeddings from previous runs (from models/saved_embeddings)
 save_run = True        # Save embeddings from current run
-dim = 2         # If load_saved: Must match an existing dim
-anchor_num = 2
-nr_runs = 2            # If load_saved: Must be <= number of saved runs for the dim
+dim = 32         # If load_saved: Must match an existing dim
+anchor_num = 50
+nr_runs = 5            # If load_saved: Must be <= number of saved runs for the dim
 hidden_layer = (32, 64) # (32, 64) or 128
 
 # Hyperparameters for anchor selection
@@ -45,7 +45,7 @@ exponent = 1
 
 # Post-processing
 zero_shot = True
-plot_embeddings = False
+plot_embeddings = True
 compute_mrr = True      # Only set true if you have >32GB of RAM
 compute_similarity = True
 ### ###
@@ -90,7 +90,6 @@ if use_small_dataset: emb_list, idx_list, labels_list = small_dataset_emb, small
 random_anchor_ids = random.sample(list(idx_list[0]), anchor_num)
 rand_anchors_list = select_anchors_by_id(model_list, emb_list, idx_list, random_anchor_ids, loader.dataset, show=False, device=device)
 
-# TODO: Instead of softmax, then pass the size of the weights of P into the loss. Average of the sum over each column (A)
 # Optimize anchors and compute P_anchors_list
 _, P_anchors_list, _ = get_P_anchors(
     emb = emb_list,
@@ -108,16 +107,17 @@ _, P_anchors_list, _ = get_P_anchors(
 
 kmeans_anchors_list, _ = get_kmeans_anchors(embeddings=emb_list, anchor_num=anchor_num, idx_list=idx_list, n_closest=100, kmeans_seed=42, verbose=False)
 
-anch_list = kmeans_anchors_list # P_anchors_list, rand_anchors_list, kmeans_anchors_list
+anch_list = rand_anchors_list # P_anchors_list, rand_anchors_list, kmeans_anchors_list
 
 # Compute relative coordinates for the embeddings
-relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)
+# relrep_list = compute_relative_coordinates_mahalanobis(emb_list, anch_list)
+relrep_list = compute_relative_coordinates_cossim(emb_list, anch_list, flatten=False)
 
 ### ZERO-SHOT STITCHING ###
 # NOTE: Decoder seems to work fine, but the relreps are hindering the performance
 if zero_shot:
     rel_decoder, rel_train_loss, rel_test_loss = train_rel_decoder(
-        epochs=15,
+        epochs=30,
         hidden_dims=hidden_layer,
         rel_model=rel_AE_conv_MNIST,
         model_list=model_list,
@@ -126,7 +126,7 @@ if zero_shot:
         loader=loader,
         nr_runs=nr_runs,
         device=device,
-        show=False,
+        show=True,
         verbose=True
     )
 
@@ -138,9 +138,9 @@ if plot_embeddings:
     else:
         title = ""
     print("Plotting absolute embeddings")
-    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=True, anchors_list=anch_list, title=f"{title}Absolute Embeddings")
+    plot_data_list(emb_list, labels_list, do_pca=do_pca, is_relrep=True, anchors_list=anch_list, title=f"{title}Absolute Embeddings", output_file=f"embeddings_abs.png")
     print("Plotting relrep")
-    plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True, title=f"{title}Relative Representations")
+    plot_data_list(relrep_list, labels_list, do_pca=do_pca, is_relrep=True, title=f"{title}Relative Representations", output_file=f"embeddings_relrep.png")
 
 # NOTE: Watch out with comparing cosine sim between cossim- and eucl relreps.
 #   The eucl relreps are only in the first quadrant, so cosine sim will be higher

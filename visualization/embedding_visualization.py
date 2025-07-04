@@ -91,7 +91,7 @@ def fit_and_align_pca(data, ref_pca=None):
 
 # Potentially fixed so anchors are plotted in the same PCA space as the data
 def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
-                   is_relrep=True, anchors_list=None, title=None):
+                   is_relrep=True, anchors_list=None, title=None, output_file='embeddings_plot.png'):
     """
     Plots multiple datasets side-by-side in subplots (1 row, len(data_list) columns).
     
@@ -162,7 +162,9 @@ def plot_data_list(data_list, labels_list, do_pca=True, ref_pca=None,
             axs[i].set_title(f'2D PCA of AE Encodings {i+1}')
     
     plt.tight_layout()
-    plt.show()
+    plt.savefig(output_file)
+    plt.close()
+    print(f"Latent plot saved to {output_file}")
 
 
 def plot_3D_relreps(embeddings, labels):
